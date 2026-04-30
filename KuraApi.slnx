@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Kura.Api/Kura.Api.csproj" />
+    <Project Path="src/Kura.Application/Kura.Application.csproj" />
+    <Project Path="src/Kura.Domain/Kura.Domain.csproj" />
+    <Project Path="src/Kura.Infrastructure/Kura.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Kura.Application.Tests/Kura.Application.Tests.csproj" />
+    <Project Path="tests/Kura.Domain.Tests/Kura.Domain.Tests.csproj" />
+  </Folder>
+</Solution>
