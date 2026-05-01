@@ -1,5 +1,6 @@
 namespace Kura.Infrastructure.Persistence.Repositories;
 
+using System.Linq.Expressions;
 using Kura.Domain.Entities;
 using Kura.Domain.Interfaces;
 using Microsoft.EntityFrameworkCore;
@@ -23,6 +24,11 @@ public class Repository<T> : IRepository<T> where T : EntidadeBase
     public async Task<IEnumerable<T>> GetAllAsync()
     {
         return await _dbSet.ToListAsync();
+    }
+
+    public async Task<IEnumerable<T>> FindAsync(Expression<Func<T, bool>> predicate)
+    {
+        return await _dbSet.Where(predicate).ToListAsync();
     }
 
     public async Task AddAsync(T entity)

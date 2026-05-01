@@ -2,6 +2,8 @@ namespace Kura.Api.Extensions;
 
 using FluentValidation;
 using Kura.Api.Services;
+using Kura.Application.Services;
+using Kura.Application.Services.Interfaces;
 using Kura.Domain.Interfaces;
 using Kura.Infrastructure.Persistence;
 using Kura.Infrastructure.Persistence.Repositories;
@@ -14,6 +16,31 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
         services.AddValidatorsFromAssemblyContaining<Kura.Application.AssemblyMarker>();
+
+        // GROUP A — Lookup/reference entities
+        services.AddScoped<IEspecieService, EspecieService>();
+        services.AddScoped<IRacaService, RacaService>();
+        services.AddScoped<ITipoEventoService, TipoEventoService>();
+        services.AddScoped<IMedicamentoService, MedicamentoService>();
+
+        // GROUP B — Core clinic entities
+        services.AddScoped<IClinicaService, ClinicaService>();
+        services.AddScoped<IVeterinarioService, VeterinarioService>();
+        services.AddScoped<ITutorService, TutorService>();
+        services.AddScoped<IPetService, PetService>();
+
+        // GROUP C — Clinical events
+        services.AddScoped<IEventoClinicoService, EventoClinicoService>();
+        services.AddScoped<IVacinaService, VacinaService>();
+        services.AddScoped<IPrescricaoService, PrescricaoService>();
+        services.AddScoped<IExameService, ExameService>();
+
+        // GROUP D — Supporting entities
+        services.AddScoped<INotificacaoService, NotificacaoService>();
+        services.AddScoped<IDispositivoIotService, DispositivoIotService>();
+        services.AddScoped<ILeituraTemperaturaService, LeituraTemperaturaService>();
+        services.AddScoped<IAlertaTemperaturaService, AlertaTemperaturaService>();
+
         return services;
     }
 
