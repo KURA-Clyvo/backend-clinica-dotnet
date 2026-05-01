@@ -1,6 +1,7 @@
 namespace Kura.Infrastructure.Persistence;
 
 using Kura.Domain.Entities;
+using Kura.Infrastructure.Persistence.ReadModels;
 using Microsoft.EntityFrameworkCore;
 
 public class KuraDbContext : DbContext
@@ -28,11 +29,17 @@ public class KuraDbContext : DbContext
     public DbSet<LeituraTemperatura> LeiturasTemperatura => Set<LeituraTemperatura>();
     public DbSet<AlertaTemperatura> AlertasTemperatura => Set<AlertaTemperatura>();
     public DbSet<LogErro> LogsErro => Set<LogErro>();
+    public DbSet<TimelineItem> TimelineItems => Set<TimelineItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.HasDefaultSchema("KURA");
+        //modelBuilder.HasDefaultSchema("KURA");
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(KuraDbContext).Assembly);
+
+        modelBuilder.Entity<TimelineItem>()
+            .HasNoKey()
+            .ToView("VW_TIMELINE_PET");
+
         base.OnModelCreating(modelBuilder);
     }
 }
