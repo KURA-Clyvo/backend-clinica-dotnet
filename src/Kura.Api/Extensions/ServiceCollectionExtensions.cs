@@ -59,6 +59,15 @@ public static class ServiceCollectionExtensions
         services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
         services.AddScoped<IClinicaContext, ClinicaContext>();
 
+        // Repositórios especializados
+        services.AddScoped<IClinicaRepository, ClinicaRepository>();
+        services.AddScoped<IVeterinarioRepository, VeterinarioRepository>();
+        services.AddScoped<ITutorRepository, TutorRepository>();
+        services.AddScoped<IPetRepository, PetRepository>();
+        services.AddScoped<ITutorPetRepository, TutorPetRepository>();
+        services.AddScoped<IEventoClinicoRepository, EventoClinicoRepository>();
+        services.AddScoped<ITimelineRepository, TimelineRepository>();
+
         return services;
     }
 }

@@ -8,10 +8,10 @@ using Kura.Domain.Interfaces;
 
 public sealed class VeterinarioService : IVeterinarioService
 {
-    private readonly IRepository<Veterinario> _repository;
+    private readonly IVeterinarioRepository _repository;
     private readonly IUnitOfWork _uow;
 
-    public VeterinarioService(IRepository<Veterinario> repository, IUnitOfWork uow)
+    public VeterinarioService(IVeterinarioRepository repository, IUnitOfWork uow)
     {
         _repository = repository;
         _uow = uow;
@@ -32,7 +32,7 @@ public sealed class VeterinarioService : IVeterinarioService
 
     public async Task<IEnumerable<VeterinarioResponseDto>> GetByClinicaAsync(long idClinica)
     {
-        var veterinarios = await _repository.FindAsync(v => v.IdClinica == idClinica);
+        var veterinarios = await _repository.GetAllByClinicaIdAsync(idClinica);
         return veterinarios.Select(ToResponse);
     }
 
@@ -60,7 +60,6 @@ public sealed class VeterinarioService : IVeterinarioService
         veterinario.NrCrmv = dto.NrCrmv;
         veterinario.DsEmail = dto.DsEmail;
         veterinario.NrTelefone = dto.NrTelefone;
-        veterinario.DtAtualizacao = DateTime.UtcNow;
 
         _repository.Update(veterinario);
         await _uow.CommitAsync();
