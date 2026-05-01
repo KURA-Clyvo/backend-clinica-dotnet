@@ -2,6 +2,7 @@ namespace Kura.Domain.Entities;
 
 public class Notificacao : EntidadeBase
 {
+    public long IdClinica { get; set; }
     public long? IdTutor { get; set; }
     public long? IdVeterinario { get; set; }
     public string DsTitulo { get; set; } = string.Empty;

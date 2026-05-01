@@ -10,17 +10,23 @@ public sealed class NotificacaoService : INotificacaoService
 {
     private readonly IRepository<Notificacao> _repository;
     private readonly IUnitOfWork _uow;
+    private readonly IClinicaContext _clinicaContext;
 
-    public NotificacaoService(IRepository<Notificacao> repository, IUnitOfWork uow)
+    public NotificacaoService(
+        IRepository<Notificacao> repository,
+        IUnitOfWork uow,
+        IClinicaContext clinicaContext)
     {
         _repository = repository;
         _uow = uow;
+        _clinicaContext = clinicaContext;
     }
 
     public async Task<NotificacaoResponseDto> CreateAsync(NotificacaoCreateDto dto)
     {
         var notificacao = new Notificacao
         {
+            IdClinica = _clinicaContext.IdClinica,
             IdTutor = dto.IdTutor,
             IdVeterinario = dto.IdVeterinario,
             DsTitulo = dto.DsTitulo,
@@ -29,6 +35,14 @@ public sealed class NotificacaoService : INotificacaoService
         await _repository.AddAsync(notificacao);
         await _uow.CommitAsync();
         return ToResponse(notificacao);
+    }
+
+    public async Task<IEnumerable<NotificacaoResponseDto>> GetAllByClinicaAsync(long idClinica, bool? apenasNaoLidas)
+    {
+        var notificacoes = await _repository.FindAsync(n => n.IdClinica == idClinica);
+        if (apenasNaoLidas == true)
+            notificacoes = notificacoes.Where(n => n.StLida == 'N');
+        return notificacoes.Select(ToResponse);
     }
 
     public async Task<IEnumerable<NotificacaoResponseDto>> GetByTutorAsync(long idTutor)
@@ -43,15 +57,19 @@ public sealed class NotificacaoService : INotificacaoService
         return notificacoes.Select(ToResponse);
     }
 
-    public async Task MarcarComoLidaAsync(long id)
+    public async Task MarcarLidaAsync(long id)
     {
         var notificacao = await _repository.GetByIdAsync(id)
             ?? throw new EntidadeNaoEncontradaException("Notificacao", id);
 
+        if (notificacao.IdClinica != _clinicaContext.IdClinica)
+            throw new EntidadeNaoEncontradaException("Notificacao", id);
+
+        if (notificacao.StLida == 'S')
+            throw new RegraDeNegocioException("Notificação já foi lida.");
+
         notificacao.StLida = 'S';
         notificacao.DtLeitura = DateTime.UtcNow;
-        notificacao.DtAtualizacao = DateTime.UtcNow;
-
         _repository.Update(notificacao);
         await _uow.CommitAsync();
     }
@@ -59,12 +77,14 @@ public sealed class NotificacaoService : INotificacaoService
     private static NotificacaoResponseDto ToResponse(Notificacao n) => new()
     {
         Id = n.Id,
+        IdClinica = n.IdClinica,
         IdTutor = n.IdTutor,
         IdVeterinario = n.IdVeterinario,
         DsTitulo = n.DsTitulo,
         DsMensagem = n.DsMensagem,
         StLida = n.StLida,
         DtLeitura = n.DtLeitura,
+        DtCriacao = n.DtCriacao,
         StAtiva = n.StAtiva
     };
 }

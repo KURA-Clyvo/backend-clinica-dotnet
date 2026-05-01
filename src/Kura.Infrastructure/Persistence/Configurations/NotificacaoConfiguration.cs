@@ -12,6 +12,10 @@ public class NotificacaoConfiguration : IEntityTypeConfiguration<Notificacao>
 
         builder.HasKey(e => e.Id);
 
+        builder.Property(e => e.IdClinica)
+            .HasColumnName("ID_CLINICA")
+            .IsRequired();
+
         builder.Property(e => e.Id)
             .HasColumnName("ID")
             .HasDefaultValueSql("SEQ_NOTIFICACAO.NEXTVAL");
