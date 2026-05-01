@@ -10,12 +10,12 @@ public sealed class PrescricaoService : IPrescricaoService
 {
     private const long IdTipoEventoPrescricao = 2L;
 
-    private readonly IRepository<EventoClinico> _eventoRepository;
+    private readonly IEventoClinicoRepository _eventoRepository;
     private readonly IRepository<Prescricao> _prescricaoRepository;
     private readonly IUnitOfWork _uow;
 
     public PrescricaoService(
-        IRepository<EventoClinico> eventoRepository,
+        IEventoClinicoRepository eventoRepository,
         IRepository<Prescricao> prescricaoRepository,
         IUnitOfWork uow)
     {
@@ -35,12 +35,10 @@ public sealed class PrescricaoService : IPrescricaoService
             DsObservacao = dto.DsObservacao
         };
 
-        await _eventoRepository.AddAsync(evento);
-        await _uow.CommitAsync();
-
+        // Navigation property — EF Core insere EventoClinico primeiro (FK ordering)
         var prescricao = new Prescricao
         {
-            IdEventoClinico = evento.Id,
+            EventoClinico = evento,
             IdMedicamento = dto.IdMedicamento,
             DsPosologia = dto.DsPosologia,
             NrDuracaoDias = dto.NrDuracaoDias
@@ -66,18 +64,14 @@ public sealed class PrescricaoService : IPrescricaoService
 
     public async Task<IEnumerable<PrescricaoResponseDto>> GetByPetAsync(long idPet)
     {
-        var eventos = await _eventoRepository.FindAsync(
-            e => e.IdPet == idPet && e.IdTipoEvento == IdTipoEventoPrescricao);
-
+        var eventos = await _eventoRepository.GetByFiltersAsync(idPet, IdTipoEventoPrescricao, null, null, null);
         var result = new List<PrescricaoResponseDto>();
         foreach (var evento in eventos)
         {
             var prescricoes = await _prescricaoRepository.FindAsync(p => p.IdEventoClinico == evento.Id);
             var prescricao = prescricoes.FirstOrDefault();
             if (prescricao is not null)
-            {
                 result.Add(BuildResponse(evento, prescricao));
-            }
         }
         return result;
     }

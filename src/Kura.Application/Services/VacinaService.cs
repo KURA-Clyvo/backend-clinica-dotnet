@@ -10,12 +10,12 @@ public sealed class VacinaService : IVacinaService
 {
     private const long IdTipoEventoVacina = 1L;
 
-    private readonly IRepository<EventoClinico> _eventoRepository;
+    private readonly IEventoClinicoRepository _eventoRepository;
     private readonly IRepository<Vacina> _vacinaRepository;
     private readonly IUnitOfWork _uow;
 
     public VacinaService(
-        IRepository<EventoClinico> eventoRepository,
+        IEventoClinicoRepository eventoRepository,
         IRepository<Vacina> vacinaRepository,
         IUnitOfWork uow)
     {
@@ -35,20 +35,16 @@ public sealed class VacinaService : IVacinaService
             DsObservacao = dto.DsObservacao
         };
 
+        // Navigation property — EF Core insere EventoClinico primeiro e usa o Id gerado na FK
         var vacina = new Vacina
         {
+            EventoClinico = evento,
             NmVacina = dto.NmVacina,
             NrLote = dto.NrLote,
             DsFabricante = dto.DsFabricante,
             DtProximaDose = dto.DtProximaDose
         };
 
-        await _eventoRepository.AddAsync(evento);
-        // vacina.IdEventoClinico will be set after commit assigns evento.Id
-        // We add vacina after commit so we can reference the generated Id
-        await _uow.CommitAsync();
-
-        vacina.IdEventoClinico = evento.Id;
         await _vacinaRepository.AddAsync(vacina);
         await _uow.CommitAsync();
 
@@ -69,18 +65,30 @@ public sealed class VacinaService : IVacinaService
 
     public async Task<IEnumerable<VacinaResponseDto>> GetByPetAsync(long idPet)
     {
-        var eventos = await _eventoRepository.FindAsync(
-            e => e.IdPet == idPet && e.IdTipoEvento == IdTipoEventoVacina);
-
+        var eventos = await _eventoRepository.GetByFiltersAsync(idPet, IdTipoEventoVacina, null, null, null);
         var result = new List<VacinaResponseDto>();
         foreach (var evento in eventos)
         {
             var vacinas = await _vacinaRepository.FindAsync(v => v.IdEventoClinico == evento.Id);
             var vacina = vacinas.FirstOrDefault();
             if (vacina is not null)
-            {
                 result.Add(BuildResponse(evento, vacina));
-            }
+        }
+        return result;
+    }
+
+    public async Task<IEnumerable<VacinaResponseDto>> GetProximasVacinasAsync(long idPet)
+    {
+        var hoje = DateTime.UtcNow.Date;
+        var eventos = await _eventoRepository.GetByFiltersAsync(idPet, IdTipoEventoVacina, null, null, null);
+        var result = new List<VacinaResponseDto>();
+        foreach (var evento in eventos)
+        {
+            var vacinas = await _vacinaRepository.FindAsync(
+                v => v.IdEventoClinico == evento.Id && v.DtProximaDose.HasValue && v.DtProximaDose.Value >= hoje);
+            var vacina = vacinas.FirstOrDefault();
+            if (vacina is not null)
+                result.Add(BuildResponse(evento, vacina));
         }
         return result;
     }

@@ -17,9 +17,15 @@ public sealed class MedicamentoService : IMedicamentoService
         _uow = uow;
     }
 
-    public async Task<IEnumerable<MedicamentoResponseDto>> GetAllAsync()
+    public async Task<IEnumerable<MedicamentoResponseDto>> SearchAsync(string? busca)
     {
-        var medicamentos = await _repository.GetAllAsync();
+        IEnumerable<Medicamento> medicamentos;
+        if (string.IsNullOrWhiteSpace(busca))
+            medicamentos = await _repository.GetAllAsync();
+        else
+            medicamentos = await _repository.FindAsync(
+                m => m.NmMedicamento.ToLower().Contains(busca.ToLower()) ||
+                     m.DsPrincipioAtivo.ToLower().Contains(busca.ToLower()));
         return medicamentos.Select(ToResponse);
     }
 

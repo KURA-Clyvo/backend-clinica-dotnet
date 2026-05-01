@@ -10,12 +10,12 @@ public sealed class ExameService : IExameService
 {
     private const long IdTipoEventoExame = 3L;
 
-    private readonly IRepository<EventoClinico> _eventoRepository;
+    private readonly IEventoClinicoRepository _eventoRepository;
     private readonly IRepository<Exame> _exameRepository;
     private readonly IUnitOfWork _uow;
 
     public ExameService(
-        IRepository<EventoClinico> eventoRepository,
+        IEventoClinicoRepository eventoRepository,
         IRepository<Exame> exameRepository,
         IUnitOfWork uow)
     {
@@ -35,12 +35,10 @@ public sealed class ExameService : IExameService
             DsObservacao = dto.DsObservacao
         };
 
-        await _eventoRepository.AddAsync(evento);
-        await _uow.CommitAsync();
-
+        // Navigation property — EF Core insere EventoClinico primeiro (FK ordering)
         var exame = new Exame
         {
-            IdEventoClinico = evento.Id,
+            EventoClinico = evento,
             NmExame = dto.NmExame,
             DsResultado = dto.DsResultado,
             DtRealizacao = dto.DtRealizacao
@@ -66,18 +64,14 @@ public sealed class ExameService : IExameService
 
     public async Task<IEnumerable<ExameResponseDto>> GetByPetAsync(long idPet)
     {
-        var eventos = await _eventoRepository.FindAsync(
-            e => e.IdPet == idPet && e.IdTipoEvento == IdTipoEventoExame);
-
+        var eventos = await _eventoRepository.GetByFiltersAsync(idPet, IdTipoEventoExame, null, null, null);
         var result = new List<ExameResponseDto>();
         foreach (var evento in eventos)
         {
             var exames = await _exameRepository.FindAsync(e => e.IdEventoClinico == evento.Id);
             var exame = exames.FirstOrDefault();
             if (exame is not null)
-            {
                 result.Add(BuildResponse(evento, exame));
-            }
         }
         return result;
     }

@@ -1,6 +1,8 @@
 namespace Kura.Api.Controllers;
 
+using Kura.Application.DTOs.EventoClinico;
 using Kura.Application.DTOs.Pet;
+using Kura.Application.DTOs.Vacina;
 using Kura.Application.Services.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,10 +11,17 @@ using Microsoft.AspNetCore.Mvc;
 public class PetsController : ControllerBase
 {
     private readonly IPetService _petService;
+    private readonly IVacinaService _vacinaService;
+    private readonly IEventoClinicoService _eventoService;
 
-    public PetsController(IPetService petService)
+    public PetsController(
+        IPetService petService,
+        IVacinaService vacinaService,
+        IEventoClinicoService eventoService)
     {
         _petService = petService;
+        _vacinaService = vacinaService;
+        _eventoService = eventoService;
     }
 
     [HttpGet]
@@ -71,5 +80,23 @@ public class PetsController : ControllerBase
     {
         await _petService.AdicionarTutorAsync(id, dto);
         return NoContent();
+    }
+
+    [HttpGet("{id:long}/timeline")]
+    [ProducesResponseType(typeof(IEnumerable<TimelineItemDto>), 200)]
+    [ProducesResponseType(404)]
+    public async Task<IActionResult> GetTimeline(long id)
+    {
+        var result = await _eventoService.GetTimelineAsync(id);
+        return Ok(result);
+    }
+
+    [HttpGet("{id:long}/proximas-vacinas")]
+    [ProducesResponseType(typeof(IEnumerable<VacinaResponseDto>), 200)]
+    [ProducesResponseType(404)]
+    public async Task<IActionResult> GetProximasVacinas(long id)
+    {
+        var result = await _vacinaService.GetProximasVacinasAsync(id);
+        return Ok(result);
     }
 }

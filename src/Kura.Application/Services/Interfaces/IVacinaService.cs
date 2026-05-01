@@ -7,4 +7,5 @@ public interface IVacinaService
     Task<VacinaResponseDto> CreateAsync(VacinaCreateDto dto);
     Task<VacinaResponseDto> GetByEventoClinicoAsync(long idEvento);
     Task<IEnumerable<VacinaResponseDto>> GetByPetAsync(long idPet);
+    Task<IEnumerable<VacinaResponseDto>> GetProximasVacinasAsync(long idPet);
 }
