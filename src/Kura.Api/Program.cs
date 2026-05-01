@@ -14,8 +14,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseSerilog((ctx, sp, cfg) => cfg
     .ReadFrom.Configuration(ctx.Configuration)
     .Enrich.FromLogContext()
-    .WriteTo.Console()
-    .WriteTo.OracleLogErro(sp));
+    .WriteTo.Console());
+    //.WriteTo.OracleLogErro(sp));
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();

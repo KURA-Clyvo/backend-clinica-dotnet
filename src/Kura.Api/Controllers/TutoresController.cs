@@ -3,8 +3,10 @@ namespace Kura.Api.Controllers;
 using Kura.Application.DTOs.Pet;
 using Kura.Application.DTOs.Tutor;
 using Kura.Application.Services.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
+[Authorize]
 [ApiController]
 [Route("api/v1/tutores")]
 public class TutoresController : ControllerBase

@@ -41,6 +41,11 @@ public class ClinicaConfiguration : IEntityTypeConfiguration<Clinica>
             .HasMaxLength(150)
             .IsRequired();
 
+        builder.Property(e => e.DsSenha)
+            .HasColumnName("DS_SENHA")
+            .HasMaxLength(100)
+            .IsRequired();
+
         builder.Property(e => e.StAtiva)
             .HasColumnName("ST_ATIVA")
             .HasColumnType("CHAR(1)")

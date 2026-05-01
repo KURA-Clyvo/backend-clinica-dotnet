@@ -3,8 +3,10 @@ namespace Kura.Api.Controllers;
 using Kura.Application.DTOs.Notificacao;
 using Kura.Application.Services.Interfaces;
 using Kura.Domain.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
+[Authorize]
 [ApiController]
 [Route("api/v1/notificacoes")]
 public class NotificacoesController : ControllerBase

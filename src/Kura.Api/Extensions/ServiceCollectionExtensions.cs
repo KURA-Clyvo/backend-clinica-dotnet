@@ -40,6 +40,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IDispositivoIotService, DispositivoIotService>();
         services.AddScoped<ILeituraTemperaturaService, LeituraTemperaturaService>();
         services.AddScoped<IAlertaTemperaturaService, AlertaTemperaturaService>();
+        services.AddScoped<IAuthService, AuthService>();
 
         return services;
     }

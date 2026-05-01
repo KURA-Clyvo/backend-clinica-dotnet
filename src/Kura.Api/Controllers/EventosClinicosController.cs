@@ -5,8 +5,10 @@ using Kura.Application.DTOs.Exame;
 using Kura.Application.DTOs.Prescricao;
 using Kura.Application.DTOs.Vacina;
 using Kura.Application.Services.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
+[Authorize]
 [ApiController]
 [Route("api/v1/eventos-clinicos")]
 public class EventosClinicosController : ControllerBase

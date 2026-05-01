@@ -2,8 +2,10 @@ namespace Kura.Api.Controllers;
 
 using Kura.Application.DTOs.Medicamento;
 using Kura.Application.Services.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
+[Authorize]
 [ApiController]
 [Route("api/v1/medicamentos")]
 public class MedicamentosController : ControllerBase

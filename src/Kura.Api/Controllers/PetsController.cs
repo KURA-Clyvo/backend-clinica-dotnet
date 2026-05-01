@@ -4,8 +4,10 @@ using Kura.Application.DTOs.EventoClinico;
 using Kura.Application.DTOs.Pet;
 using Kura.Application.DTOs.Vacina;
 using Kura.Application.Services.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
+[Authorize]
 [ApiController]
 [Route("api/v1/pets")]
 public class PetsController : ControllerBase

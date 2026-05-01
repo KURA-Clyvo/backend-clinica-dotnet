@@ -7,5 +7,6 @@ public class Clinica : EntidadeBase
     public string DsEndereco { get; set; } = string.Empty;
     public string NrTelefone { get; set; } = string.Empty;
     public string DsEmail { get; set; } = string.Empty;
+    public string DsSenha { get; set; } = string.Empty;
     public ICollection<Veterinario> Veterinarios { get; set; } = [];
 }

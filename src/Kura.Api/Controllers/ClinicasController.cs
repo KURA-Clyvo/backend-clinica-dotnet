@@ -2,8 +2,10 @@ namespace Kura.Api.Controllers;
 
 using Kura.Application.DTOs.Clinica;
 using Kura.Application.Services.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
+[Authorize]
 [ApiController]
 [Route("api/v1/clinicas")]
 public class ClinicasController : ControllerBase
