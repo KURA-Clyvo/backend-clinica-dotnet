@@ -15,15 +15,23 @@ public class LunaServiceTests
     private readonly Mock<IRepository<InteracaoCanal>> _interacaoRepoMock = new();
     private readonly Mock<ITutorRepository> _tutorRepoMock = new();
     private readonly Mock<IUnitOfWork> _uowMock = new();
+    // LU-08: usado só por ListarTriagensAsync (GET /luna/triagens, o único dos 4
+    // endpoints deste service que tem JWT de clínica). Setup default devolve a
+    // clínica semeada 1 — testes de ListarTriagensAsync sobrescrevem quando
+    // precisam de outro valor.
+    private readonly Mock<IClinicaContext> _clinicaContextMock = new();
     private readonly LunaService _sut;
 
     public LunaServiceTests()
     {
+        _clinicaContextMock.Setup(c => c.IdClinica).Returns(1);
+
         _sut = new LunaService(
             _triagemRepoMock.Object,
             _interacaoRepoMock.Object,
             _tutorRepoMock.Object,
-            _uowMock.Object);
+            _uowMock.Object,
+            _clinicaContextMock.Object);
     }
 
     private static DateTime Inicio => new(2026, 5, 1);
