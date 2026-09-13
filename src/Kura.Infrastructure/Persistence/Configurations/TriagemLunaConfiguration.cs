@@ -60,5 +60,19 @@ public class TriagemLunaConfiguration : IEntityTypeConfiguration<TriagemLuna>
 
         builder.Property(e => e.DtAtualizacao)
             .HasColumnName("DT_ATUALIZACAO");
+
+        // LU-08 / V21 (backend-tutor-java, em paralelo): colunas novas, todas
+        // NULLABLE — sem IsRequired() de propósito. O .NET não gera DDL contra
+        // Oracle (MIGRATIONS_POLICY.md); quem cria estas 3 colunas é a V21.
+        builder.Property(e => e.NrScore)
+            .HasColumnName("NR_SCORE");
+
+        builder.Property(e => e.DsSintomas)
+            .HasColumnName("DS_SINTOMAS")
+            .HasMaxLength(1000);
+
+        builder.Property(e => e.DsRegrasVersao)
+            .HasColumnName("DS_REGRAS_VERSAO")
+            .HasMaxLength(10);
     }
 }

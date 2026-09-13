@@ -28,5 +28,13 @@ public sealed class TriageRequestValidator : AbstractValidator<TriageRequestDto>
         RuleFor(x => x.DsRecomendacao)
             .NotEmpty()
             .WithMessage("'ds_recomendacao' não pode ser vazio.");
+
+        // LU-08: opcional e retrocompatível (payload sem o campo continua 201) —
+        // só valida tamanho quando presente, nunca presença. DS_REGRAS_VERSAO é
+        // VARCHAR2(10) na V21 (backend-tutor-java, em paralelo).
+        RuleFor(x => x.DsRegrasVersao)
+            .MaximumLength(10)
+            .WithMessage("'regras_versao' deve ter no máximo 10 caracteres.")
+            .When(x => x.DsRegrasVersao is not null);
     }
 }
