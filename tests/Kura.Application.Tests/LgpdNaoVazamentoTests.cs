@@ -61,7 +61,8 @@ public class LgpdNaoVazamentoTests
             Mock.Of<ITriagemLunaRepository>(),
             interacaoRepo.Object,
             Mock.Of<ITutorRepository>(),
-            Mock.Of<IUnitOfWork>());
+            Mock.Of<IUnitOfWork>(),
+            Mock.Of<IClinicaContext>());
 
         var dto = new InteractionRequestDto
         {
@@ -96,7 +97,8 @@ public class LgpdNaoVazamentoTests
             Mock.Of<ITriagemLunaRepository>(),
             Mock.Of<IRepository<InteracaoCanal>>(),
             tutorRepo.Object,
-            Mock.Of<IUnitOfWork>());
+            Mock.Of<IUnitOfWork>(),
+            Mock.Of<IClinicaContext>());
 
         var dto = new InteractionRequestDto
         {

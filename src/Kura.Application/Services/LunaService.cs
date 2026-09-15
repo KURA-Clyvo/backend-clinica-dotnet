@@ -1,11 +1,13 @@
 namespace Kura.Application.Services;
 
 using System.Text;
+using Kura.Application.DTOs.Common;
 using Kura.Application.DTOs.Luna;
 using Kura.Application.Services.Interfaces;
 using Kura.Domain.Entities;
 using Kura.Domain.Exceptions;
 using Kura.Domain.Interfaces;
+using Kura.Domain.ValueObjects;
 
 public sealed class LunaService : ILunaService
 {
@@ -34,32 +36,47 @@ public sealed class LunaService : ILunaService
     // Mesmo raciocínio de bytes-vs-caracteres do MaxTamanhoConteudoBytes acima.
     private const int MaxTamanhoDescricaoTriagemBytes = 2000;
 
+    // DS_SINTOMAS é VARCHAR2(1000) NULLABLE (V21, backend-tutor-java, em paralelo —
+    // LU-02). Mesmo raciocínio de bytes-vs-caracteres das duas constantes acima.
+    private const int MaxTamanhoSintomasBytes = 1000;
+
+    // Delimitador documentado do texto gravado em DS_SINTOMAS — ver o comentário de
+    // TriagemLuna.DsSintomas para o porquê de ';' e não JSON/CSV.
+    private const string DelimitadorSintomas = ";";
+
     private const string MarcadorTruncamento = "…[truncado]";
+
+    // LU-08: paginação de GET /api/v1/luna/triagens — mesmo teto/clamp de
+    // MedicamentoService.ListarAsync (o único outro endpoint paginado do repo).
+    private const int PageSizeMaximo = 100;
 
     private readonly ITriagemLunaRepository _triagemRepository;
     private readonly IRepository<InteracaoCanal> _interacaoRepository;
     private readonly ITutorRepository _tutorRepository;
     private readonly IUnitOfWork _uow;
 
+    // LU-08: única dependência nova do service. Os 3 endpoints TASK-67
+    // (interactions/triage/relatório histórico) são chamados sem JWT de clínica — só
+    // GET /triagens usa isto, e só ele pode (é o único [Authorize] simples dos 4).
+    private readonly IClinicaContext _clinicaContext;
+
     public LunaService(
         ITriagemLunaRepository triagemRepository,
         IRepository<InteracaoCanal> interacaoRepository,
         ITutorRepository tutorRepository,
-        IUnitOfWork uow)
+        IUnitOfWork uow,
+        IClinicaContext clinicaContext)
     {
         _triagemRepository = triagemRepository;
         _interacaoRepository = interacaoRepository;
         _tutorRepository = tutorRepository;
         _uow = uow;
+        _clinicaContext = clinicaContext;
     }
 
     public async Task<RelatorioTriagensDto> GerarRelatorioAsync(DateTime dataInicio, DateTime dataFim)
     {
-        if (dataFim < dataInicio)
-            throw new RegraDeNegocioException("DataFim não pode ser anterior à DataInicio.");
-
-        if ((dataFim - dataInicio).TotalDays > MaxIntervaloDias)
-            throw new RegraDeNegocioException($"Intervalo máximo de {MaxIntervaloDias} dias.");
+        ValidarPeriodo(dataInicio, dataFim);
 
         var triagens = await _triagemRepository.GetByIntervaloAsync(dataInicio, dataFim);
 
@@ -75,6 +92,79 @@ public sealed class LunaService : ILunaService
             PorUrgencia = porUrgencia,
             EncaminhadasParaVet = triagens.Count(t => t.StEncaminhadoVet)
         };
+    }
+
+    /// <summary>
+    /// LU-08: GET /api/v1/luna/triagens. idClinica vem SEMPRE de IClinicaContext (o
+    /// token JWT), nunca de query string — não existe parâmetro de clínica na
+    /// assinatura pública deste método de propósito, para tornar IDOR por
+    /// clinicaId=outroTenant estruturalmente impossível aqui (diferente de
+    /// VeterinariosController.GetAll pré-R2, que aceitava e ignorava — aqui o
+    /// parâmetro nem existe). page/pageSize seguem o mesmo clamp de
+    /// MedicamentoService.ListarAsync. Período opcional: quando os dois extremos são
+    /// informados, valida o mesmo teto de 90 dias do relatório (ValidarPeriodo); só um
+    /// dos dois informado filtra em aberto de um dos lados, sem teto (não há como
+    /// violar "90 dias" com um intervalo que não tem os dois extremos).
+    /// </summary>
+    public async Task<PagedResultDto<TriagemListaItemDto>> ListarTriagensAsync(
+        string? urgencia,
+        DateTime? dataInicio,
+        DateTime? dataFim,
+        int page,
+        int pageSize)
+    {
+        if (dataInicio.HasValue && dataFim.HasValue)
+            ValidarPeriodo(dataInicio.Value, dataFim.Value);
+
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, PageSizeMaximo);
+
+        var (itens, total) = await _triagemRepository.ListarPorClinicaAsync(
+            _clinicaContext.IdClinica, urgencia, dataInicio, dataFim, page, pageSize);
+
+        return new PagedResultDto<TriagemListaItemDto>
+        {
+            Items = itens.Select(MapearItemLista),
+            Total = total,
+            Page = page,
+            PageSize = pageSize
+        };
+    }
+
+    // Fix wave 1 (IMPORTANTE-1, lu-08-revisao.md frentes 4/5): DT_TRIAGEM é gravado com
+    // DateTime.UtcNow (RegistrarTriagemAsync), mas o provider Oracle do EF devolve
+    // TIMESTAMP(6) como DateTimeKind.Unspecified — confirmado em Oracle real pela G2
+    // ("2026-09-15T00:51:29.257834", sem "Z"; o mesmo teste em InMemory preserva
+    // Kind=Utc e NUNCA reproduz isto). System.Text.Json só emite o sufixo "Z" para
+    // Kind=Utc; sem ele, o app (LU-09, JS) interpreta a string como hora LOCAL — 3h de
+    // erro no fuso do compose (America/Sao_Paulo, UTC-3). SpecifyKind é seguro aqui
+    // porque a coluna É sempre UTC na escrita (nunca outro fuso) — não é uma conversão,
+    // é restaurar a marcação que o Oracle perde. Corrigido só na leitura deste DTO
+    // (não no converter global do EF, que afetaria outras entidades — fora de escopo).
+    private static TriagemListaItemDto MapearItemLista(TriagemListaItem item) =>
+        new()
+        {
+            IdTriagem = item.IdTriagem,
+            DtTriagem = DateTime.SpecifyKind(item.DtTriagem, DateTimeKind.Utc),
+            Urgencia = item.Urgencia,
+            Sintomas = [.. item.Sintomas],
+            Score = item.Score,
+            RegrasVersao = item.RegrasVersao,
+            EncaminhadoVet = item.EncaminhadoVet,
+            Tutor = item.IdTutor.HasValue
+                ? new TutorTriagemDto { Id = item.IdTutor.Value, Nome = item.NomeTutor ?? string.Empty }
+                : null,
+            Pets = [.. item.Pets.Select(p => new PetTriagemDto { Id = p.IdPet, Nome = p.NmPet, Especie = p.NmEspecie })],
+            TrechoMensagem = item.TrechoMensagem
+        };
+
+    private static void ValidarPeriodo(DateTime dataInicio, DateTime dataFim)
+    {
+        if (dataFim < dataInicio)
+            throw new RegraDeNegocioException("DataFim não pode ser anterior à DataInicio.");
+
+        if ((dataFim - dataInicio).TotalDays > MaxIntervaloDias)
+            throw new RegraDeNegocioException($"Intervalo máximo de {MaxIntervaloDias} dias.");
     }
 
     public async Task<InteractionResponseDto> RegistrarInteracaoAsync(InteractionRequestDto dto)
@@ -139,9 +229,22 @@ public sealed class LunaService : ILunaService
         // leituras acima (GetByIdAsync por PK) não escopam por clínica sozinhas. Sem
         // esta checagem, uma triagem gravada com ID_CLINICA da clínica do tutor podia
         // carregar ID_INTERACAO apontando para uma interação de OUTRA clínica —
-        // inconsistência de FK cross-tenant que hoje não vaza conteúdo (nenhum join
-        // lê INTERACAO_CANAL a partir de TRIAGEM_LUNA), mas vira vazamento real no dia
-        // em que alguém adicionar esse join. Mensagem sem PII de propósito.
+        // inconsistência de FK cross-tenant.
+        //
+        // ATUALIZAÇÃO (LU-08): o join que este comentário previa ("vira vazamento
+        // real no dia em que alguém adicionar esse join") agora EXISTE —
+        // GET /api/v1/luna/triagens (LunaController.ListarTriagens →
+        // LunaService.ListarTriagensAsync) lê INTERACAO_CANAL a partir de
+        // TRIAGEM_LUNA para compor trechoMensagem. O predicado de clínica desse join
+        // NÃO é delegado ao HasQueryFilter global — está explícito na chave composta
+        // (IdInteracao, IdClinica) do join em
+        // TriagemLunaRepository.ListarPorClinicaAsync, exatamente para que uma
+        // inconsistência como a que esta checagem previne (se algum dia escapar por
+        // um caminho de escrita futuro que não passe por aqui) degrade para
+        // trechoMensagem=null em vez de vazar DS_CONTEUDO de outra clínica. A checagem
+        // abaixo continua sendo a defesa PRIMÁRIA (impede a inconsistência de nascer);
+        // o predicado do join é a defesa SECUNDÁRIA (contém o dano se ela nascer
+        // mesmo assim). Mensagem sem PII de propósito.
         //
         // Decisão TASK-77 (FIX_7): InteracaoCanal.IdClinica é nullable desde esta task
         // (interação de tutor não identificado grava com IdClinica null — ver
@@ -171,7 +274,19 @@ public sealed class LunaService : ILunaService
             // Decisão 3 (TASK-67): DT_TRIAGEM é NOT NULL e não vem do payload — coalesce
             // no service para "agora" (mesmo padrão TASK-56/60: nunca NotEmpty() no
             // validator pra consertar shape de coluna que o cliente não popula).
-            DtTriagem = DateTime.UtcNow
+            DtTriagem = DateTime.UtcNow,
+
+            // LU-08 (V21, em paralelo): colunas estruturadas novas, além de
+            // DS_DESCRICAO (que continua sendo composta acima — nenhum consumidor
+            // antigo quebra).
+            NrScore = dto.NrScore,
+            DsSintomas = ComporSintomas(dto.Sintomas),
+            DsRegrasVersao = dto.DsRegrasVersao,
+
+            // D-L5 (LU-08, fecha A2): único lugar do sistema que decide
+            // ST_ENCAMINHADO_VET. ALTA vira encaminhamento automático; MEDIA/BAIXA
+            // não.
+            StEncaminhadoVet = dto.DsUrgencia == "ALTA"
         };
 
         await _triagemRepository.AddAsync(triagem);
@@ -194,6 +309,24 @@ public sealed class LunaService : ILunaService
         var sintomasTexto = sintomas.Count > 0 ? string.Join(", ", sintomas) : "não informado";
         var texto = $"Sintomas: {sintomasTexto}. Score: {score}. Recomendação: {recomendacao}";
         return TruncarPorBytesUtf8(texto, MaxTamanhoDescricaoTriagemBytes);
+    }
+
+    /// <summary>
+    /// LU-08: grava sintomas[] em DS_SINTOMAS como texto delimitado por ';'
+    /// (DelimitadorSintomas) — não JSON, não CSV, documentado em TriagemLuna.cs e lido
+    /// de volta (Split) em TriagemLunaRepository.ListarPorClinicaAsync. Lista vazia
+    /// grava null (nenhum sintoma informado é diferente de "não informado" — esse
+    /// texto continua só em DS_DESCRICAO, que é para exibição, não para parsing).
+    /// Truncamento por BYTES UTF-8, nunca por caractere — mesmo raciocínio das duas
+    /// constantes irmãs.
+    /// </summary>
+    private static string? ComporSintomas(List<string> sintomas)
+    {
+        if (sintomas.Count == 0)
+            return null;
+
+        var texto = string.Join(DelimitadorSintomas, sintomas);
+        return TruncarPorBytesUtf8(texto, MaxTamanhoSintomasBytes);
     }
 
     /// <summary>
