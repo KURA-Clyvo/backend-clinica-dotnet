@@ -667,4 +667,291 @@ public class LunaServiceTests
         // Assert
         await act.Should().ThrowAsync<EntidadeNaoEncontradaException>();
     }
+
+    // ── RegistrarTriagemAsync — StEncaminhadoVet (LU-08, D-L5) ──────────────
+
+    private async Task<TriagemLuna> RegistrarComUrgenciaAsync(string urgencia)
+    {
+        var tutor = TutorClinica42();
+        var interacao = InteracaoExistente();
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(tutor.Id)).ReturnsAsync(tutor);
+        _interacaoRepoMock.Setup(r => r.GetByIdAsync(interacao.Id)).ReturnsAsync(interacao);
+
+        TriagemLuna? capturada = null;
+        _triagemRepoMock
+            .Setup(r => r.AddAsync(It.IsAny<TriagemLuna>()))
+            .Callback<TriagemLuna>(t => capturada = t)
+            .Returns(Task.CompletedTask);
+
+        var dto = new TriageRequestDto
+        {
+            IdInteracao = interacao.Id,
+            IdTutor = tutor.Id,
+            Sintomas = ["sintoma"],
+            DsUrgencia = urgencia,
+            NrScore = 50,
+            DsRecomendacao = "recomendacao"
+        };
+
+        await _sut.RegistrarTriagemAsync(dto);
+        return capturada!;
+    }
+
+    [Fact]
+    public async Task RegistrarTriagemAsync_UrgenciaALTA_MarcaStEncaminhadoVet()
+    {
+        var capturada = await RegistrarComUrgenciaAsync("ALTA");
+
+        capturada.StEncaminhadoVet.Should().BeTrue("D-L5: ALTA é o único nível que encaminha automaticamente");
+    }
+
+    [Fact]
+    public async Task RegistrarTriagemAsync_UrgenciaMEDIA_NaoMarcaStEncaminhadoVet()
+    {
+        var capturada = await RegistrarComUrgenciaAsync("MEDIA");
+
+        capturada.StEncaminhadoVet.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RegistrarTriagemAsync_UrgenciaBAIXA_NaoMarcaStEncaminhadoVet()
+    {
+        var capturada = await RegistrarComUrgenciaAsync("BAIXA");
+
+        capturada.StEncaminhadoVet.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RegistrarTriagemAsync_ALTA_RelatorioContaEncaminhadaParaVet()
+    {
+        // Integra RegistrarTriagemAsync (StEncaminhadoVet) com GerarRelatorioAsync (KPI) —
+        // fecha A2 (FIXES_PENDENTES): o KPI deixou de ser zero estrutural. O relatório lê
+        // do repositório (mock), então esta é a ponte entre "o que foi gravado" e "o que o
+        // relatório soma" — GerarRelatorioAsync em si já é coberto por
+        // GerarRelatorioAsync_IntervaloValido_RetornaAgregacaoCorreta acima.
+        var capturada = await RegistrarComUrgenciaAsync("ALTA");
+
+        _triagemRepoMock.Setup(r => r.GetByIntervaloAsync(Inicio, Fim))
+            .ReturnsAsync([capturada]);
+
+        var relatorio = await _sut.GerarRelatorioAsync(Inicio, Fim);
+
+        relatorio.EncaminhadasParaVet.Should().BeGreaterThanOrEqualTo(1);
+    }
+
+    // ── RegistrarTriagemAsync — colunas estruturadas LU-08/V21 ──────────────
+
+    [Fact]
+    public async Task RegistrarTriagemAsync_ComRegrasVersao_Persiste()
+    {
+        // Retrocompat (metade "com o campo"): payload que manda regras_versao grava o
+        // valor em DsRegrasVersao. Contrato LU-07/LU-08.
+        var tutor = TutorClinica42();
+        var interacao = InteracaoExistente();
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(tutor.Id)).ReturnsAsync(tutor);
+        _interacaoRepoMock.Setup(r => r.GetByIdAsync(interacao.Id)).ReturnsAsync(interacao);
+
+        TriagemLuna? capturada = null;
+        _triagemRepoMock
+            .Setup(r => r.AddAsync(It.IsAny<TriagemLuna>()))
+            .Callback<TriagemLuna>(t => capturada = t)
+            .Returns(Task.CompletedTask);
+
+        var dto = new TriageRequestDto
+        {
+            IdInteracao = interacao.Id,
+            IdTutor = tutor.Id,
+            Sintomas = ["vomito", "letargia"],
+            DsUrgencia = "ALTA",
+            NrScore = 87,
+            DsRecomendacao = "levar ao vet",
+            DsRegrasVersao = "1.1"
+        };
+
+        await _sut.RegistrarTriagemAsync(dto);
+
+        capturada.Should().NotBeNull();
+        capturada!.DsRegrasVersao.Should().Be("1.1");
+        capturada.NrScore.Should().Be(87);
+        capturada.DsSintomas.Should().Be("vomito;letargia",
+            "delimitador documentado em TriagemLuna.DsSintomas — lido de volta por Split em ListarPorClinicaAsync");
+    }
+
+    [Fact]
+    public async Task RegistrarTriagemAsync_SemRegrasVersao_PersisteNulo_RetrocompatComPayloadAntigo()
+    {
+        // Retrocompat (metade "sem o campo"): TriageRequestDto.DsRegrasVersao é opcional
+        // — um payload da Luna anterior ao LU-07 (sem "regras_versao" no JSON) continua
+        // desserializando com o campo null e continua devolvendo 201 (não lança).
+        var tutor = TutorClinica42();
+        var interacao = InteracaoExistente();
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(tutor.Id)).ReturnsAsync(tutor);
+        _interacaoRepoMock.Setup(r => r.GetByIdAsync(interacao.Id)).ReturnsAsync(interacao);
+
+        TriagemLuna? capturada = null;
+        _triagemRepoMock
+            .Setup(r => r.AddAsync(It.IsAny<TriagemLuna>()))
+            .Callback<TriagemLuna>(t => capturada = t)
+            .Returns(Task.CompletedTask);
+
+        // DsRegrasVersao deliberadamente OMITIDO — simula um payload/DTO desserializado
+        // sem "regras_versao" no JSON de origem (default do init-property é null).
+        var dto = new TriageRequestDto
+        {
+            IdInteracao = interacao.Id,
+            IdTutor = tutor.Id,
+            Sintomas = ["tosse"],
+            DsUrgencia = "BAIXA",
+            NrScore = 10,
+            DsRecomendacao = "observar"
+        };
+
+        var act = async () => await _sut.RegistrarTriagemAsync(dto);
+
+        await act.Should().NotThrowAsync();
+        capturada.Should().NotBeNull();
+        capturada!.DsRegrasVersao.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RegistrarTriagemAsync_SemSintomas_GravaDsSintomasNulo()
+    {
+        // Lista vazia grava null (não a string "não informado", que fica só em
+        // DS_DESCRICAO) — ver ComporSintomas.
+        var tutor = TutorClinica42();
+        var interacao = InteracaoExistente();
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(tutor.Id)).ReturnsAsync(tutor);
+        _interacaoRepoMock.Setup(r => r.GetByIdAsync(interacao.Id)).ReturnsAsync(interacao);
+
+        TriagemLuna? capturada = null;
+        _triagemRepoMock
+            .Setup(r => r.AddAsync(It.IsAny<TriagemLuna>()))
+            .Callback<TriagemLuna>(t => capturada = t)
+            .Returns(Task.CompletedTask);
+
+        var dto = new TriageRequestDto
+        {
+            IdInteracao = interacao.Id,
+            IdTutor = tutor.Id,
+            Sintomas = [],
+            DsUrgencia = "BAIXA",
+            NrScore = 0,
+            DsRecomendacao = "observar"
+        };
+
+        await _sut.RegistrarTriagemAsync(dto);
+
+        capturada!.DsSintomas.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RegistrarTriagemAsync_SintomasAcentuadosMaiorQue1000Bytes_TruncaPorBytes()
+    {
+        // Mesmo raciocínio de bytes-vs-caracteres de DS_DESCRICAO/DS_CONTEUDO, agora em
+        // DS_SINTOMAS (VARCHAR2(1000), V21).
+        var tutor = TutorClinica42();
+        var interacao = InteracaoExistente();
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(tutor.Id)).ReturnsAsync(tutor);
+        _interacaoRepoMock.Setup(r => r.GetByIdAsync(interacao.Id)).ReturnsAsync(interacao);
+
+        TriagemLuna? capturada = null;
+        _triagemRepoMock
+            .Setup(r => r.AddAsync(It.IsAny<TriagemLuna>()))
+            .Callback<TriagemLuna>(t => capturada = t)
+            .Returns(Task.CompletedTask);
+
+        var sintomasAcentuados = Enumerable.Range(0, 60)
+            .Select(_ => "inflamação não específica çãêôáíóú")
+            .ToList();
+
+        var dto = new TriageRequestDto
+        {
+            IdInteracao = interacao.Id,
+            IdTutor = tutor.Id,
+            Sintomas = sintomasAcentuados,
+            DsUrgencia = "MEDIA",
+            NrScore = 40,
+            DsRecomendacao = "observar"
+        };
+
+        await _sut.RegistrarTriagemAsync(dto);
+
+        System.Text.Encoding.UTF8.GetByteCount(capturada!.DsSintomas!).Should().BeLessThanOrEqualTo(1000);
+        capturada.DsSintomas.Should().EndWith("…[truncado]");
+    }
+
+    // ── ListarTriagensAsync (LU-08 — GET /api/v1/luna/triagens) ─────────────
+
+    [Fact]
+    public async Task ListarTriagensAsync_UsaIdClinicaDoContextoJwt_NuncaDaQueryString()
+    {
+        // IClinicaContext é a ÚNICA fonte de idClinica — a assinatura pública do método
+        // nem aceita esse parâmetro (ver docstring de ListarTriagensAsync), então este
+        // teste prova o que passa para o repositório: o valor do mock de IClinicaContext.
+        _clinicaContextMock.Setup(c => c.IdClinica).Returns(77);
+        _triagemRepoMock
+            .Setup(r => r.ListarPorClinicaAsync(77, null, null, null, 1, 20))
+            .ReturnsAsync(((IReadOnlyList<Kura.Domain.ValueObjects.TriagemListaItem>)[], 0));
+
+        await _sut.ListarTriagensAsync(null, null, null, 1, 20);
+
+        _triagemRepoMock.Verify(r => r.ListarPorClinicaAsync(77, null, null, null, 1, 20), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(-5, 1)]
+    [InlineData(1, 1)]
+    public async Task ListarTriagensAsync_PageInvalidoOuZero_ClampaParaPagina1(int pageSolicitado, int pageEsperado)
+    {
+        _triagemRepoMock
+            .Setup(r => r.ListarPorClinicaAsync(It.IsAny<long>(), null, null, null, pageEsperado, 20))
+            .ReturnsAsync(((IReadOnlyList<Kura.Domain.ValueObjects.TriagemListaItem>)[], 0));
+
+        var resultado = await _sut.ListarTriagensAsync(null, null, null, pageSolicitado, 20);
+
+        resultado.Page.Should().Be(pageEsperado);
+    }
+
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(500, 100)]
+    [InlineData(20, 20)]
+    public async Task ListarTriagensAsync_PageSizeForaDoIntervalo_Clampa(int pageSizeSolicitado, int pageSizeEsperado)
+    {
+        _triagemRepoMock
+            .Setup(r => r.ListarPorClinicaAsync(It.IsAny<long>(), null, null, null, 1, pageSizeEsperado))
+            .ReturnsAsync(((IReadOnlyList<Kura.Domain.ValueObjects.TriagemListaItem>)[], 0));
+
+        var resultado = await _sut.ListarTriagensAsync(null, null, null, 1, pageSizeSolicitado);
+
+        resultado.PageSize.Should().Be(pageSizeEsperado);
+    }
+
+    [Fact]
+    public async Task ListarTriagensAsync_PeriodoMaiorQue90Dias_Lanca422_MesmoValidadorDoRelatorio()
+    {
+        var act = async () => await _sut.ListarTriagensAsync(
+            null, Inicio, Inicio.AddDays(91), 1, 20);
+
+        await act.Should().ThrowAsync<RegraDeNegocioException>();
+        _triagemRepoMock.Verify(
+            r => r.ListarPorClinicaAsync(It.IsAny<long>(), It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<int>(), It.IsAny<int>()),
+            Times.Never,
+            "período inválido não pode chegar a consultar o repositório");
+    }
+
+    [Fact]
+    public async Task ListarTriagensAsync_ApenasUmExtremoDoPeriodo_NaoValida90Dias()
+    {
+        // Só dataInicio OU só dataFim não tem como violar "90 dias" (não há intervalo
+        // fechado) — ver docstring de ListarTriagensAsync. Não pode lançar.
+        _triagemRepoMock
+            .Setup(r => r.ListarPorClinicaAsync(It.IsAny<long>(), null, Inicio, null, 1, 20))
+            .ReturnsAsync(((IReadOnlyList<Kura.Domain.ValueObjects.TriagemListaItem>)[], 0));
+
+        var act = async () => await _sut.ListarTriagensAsync(null, Inicio, null, 1, 20);
+
+        await act.Should().NotThrowAsync();
+    }
 }
