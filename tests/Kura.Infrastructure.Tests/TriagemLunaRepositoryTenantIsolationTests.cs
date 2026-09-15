@@ -1,5 +1,6 @@
 namespace Kura.Infrastructure.Tests;
 
+using System.Text;
 using FluentAssertions;
 using Kura.Domain.Entities;
 using Kura.Domain.Interfaces;
@@ -304,5 +305,102 @@ public class TriagemLunaRepositoryTenantIsolationTests
         item.Score.Should().Be(87);
         item.RegrasVersao.Should().Be("1.1");
         item.EncaminhadoVet.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Fix wave 1 (MENOR-1, lu-08-revisao.md frente 3): antes deste teste, a mutação (f)
+    /// que remove o corte de <c>trechoMensagem</c> passava 697/697 sem mordida — nenhum
+    /// teste existente usava mensagem &gt; 280 caracteres. Mordida: reverter
+    /// <c>ObterTrechoMensagem</c> para <c>conteudo[..280]</c> (sempre corta, sem checar
+    /// limite) ainda passaria aqui porque 300 &gt; 280 — a mordida REAL é remover o corte
+    /// por completo (retornar <c>conteudo</c> sem truncar), que faz este teste falhar.
+    /// </summary>
+    [Fact]
+    public async Task ListarPorClinicaAsync_TrechoMensagemMaiorQue280Caracteres_TruncaEm280()
+    {
+        // Arrange
+        var ctx = CreateContext(nameof(ListarPorClinicaAsync_TrechoMensagemMaiorQue280Caracteres_TruncaEm280));
+
+        ctx.InteracoesCanal.Add(new InteracaoCanal
+        {
+            Id = 500,
+            IdClinica = ClinicaA,
+            DsCanal = "WHATSAPP",
+            DsDirecao = "INBOUND",
+            DsConteudo = new string('a', 300),
+            DtRecebimento = new DateTime(2026, 5, 1),
+        });
+        ctx.TriagensLuna.Add(new TriagemLuna
+        {
+            Id = 5,
+            IdClinica = ClinicaA,
+            IdInteracao = 500,
+            DsNivelUrgencia = "BAIXA",
+            DsDescricao = "d",
+            DtTriagem = new DateTime(2026, 5, 1),
+        });
+        await ctx.SaveChangesAsync();
+
+        var repo = new TriagemLunaRepository(ctx);
+
+        // Act
+        var (itens, _) = await repo.ListarPorClinicaAsync(ClinicaA, null, null, null, 1, 20);
+
+        // Assert
+        var item = itens.Should().ContainSingle().Subject;
+        item.TrechoMensagem.Should().NotBeNull();
+        item.TrechoMensagem!.Length.Should().BeLessThanOrEqualTo(280);
+    }
+
+    /// <summary>
+    /// MENOR-6 (G2, medido contra Oracle real): <c>conteudo[..280]</c> corta por unidade
+    /// UTF-16, sem olhar par substituto — a G2 viu literalmente
+    /// <c>"aaa…(279 'a')…�"</c> no JSON quando o corte caía no meio de um emoji.
+    /// Semeia 279 'a' + emoji (par substituto de 2 unidades UTF-16) + texto, cruzando
+    /// exatamente a borda de 280, e prova que o resultado não deixa surrogate solto.
+    /// </summary>
+    [Fact]
+    public async Task ListarPorClinicaAsync_TrechoMensagemComEmojiNaBorda280_NaoPartePairSubstituto()
+    {
+        // Arrange
+        var ctx = CreateContext(nameof(ListarPorClinicaAsync_TrechoMensagemComEmojiNaBorda280_NaoPartePairSubstituto));
+
+        var conteudo = new string('a', 279) + "🐶" + " cauda abanando muito, o que pode ser?";
+        ctx.InteracoesCanal.Add(new InteracaoCanal
+        {
+            Id = 501,
+            IdClinica = ClinicaA,
+            DsCanal = "WHATSAPP",
+            DsDirecao = "INBOUND",
+            DsConteudo = conteudo,
+            DtRecebimento = new DateTime(2026, 5, 1),
+        });
+        ctx.TriagensLuna.Add(new TriagemLuna
+        {
+            Id = 6,
+            IdClinica = ClinicaA,
+            IdInteracao = 501,
+            DsNivelUrgencia = "BAIXA",
+            DsDescricao = "d",
+            DtTriagem = new DateTime(2026, 5, 1),
+        });
+        await ctx.SaveChangesAsync();
+
+        var repo = new TriagemLunaRepository(ctx);
+
+        // Act
+        var (itens, _) = await repo.ListarPorClinicaAsync(ClinicaA, null, null, null, 1, 20);
+
+        // Assert
+        var item = itens.Should().ContainSingle().Subject;
+        item.TrechoMensagem.Should().NotBeNull();
+        item.TrechoMensagem!.Length.Should().BeLessThanOrEqualTo(280);
+
+        // Round-trip UTF-8: um high surrogate solto vira U+FFFD ao codificar; se o corte
+        // não partiu o emoji, o round-trip é idêntico ao texto original.
+        var bytesUtf8 = Encoding.UTF8.GetBytes(item.TrechoMensagem);
+        var roundtrip = Encoding.UTF8.GetString(bytesUtf8);
+        roundtrip.Should().Be(item.TrechoMensagem,
+            "corte não pode deixar surrogate solto na borda (vira � ao serializar)");
     }
 }

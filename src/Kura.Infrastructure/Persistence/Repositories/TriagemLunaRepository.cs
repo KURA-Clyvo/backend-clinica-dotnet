@@ -1,5 +1,6 @@
 namespace Kura.Infrastructure.Persistence.Repositories;
 
+using System.Text;
 using Kura.Domain.Entities;
 using Kura.Domain.Interfaces;
 using Kura.Domain.ValueObjects;
@@ -144,10 +145,35 @@ public class TriagemLunaRepository(KuraDbContext context) : ITriagemLunaReposito
     // constantes de truncamento de LunaService não se aplica (brief LU-08, item 3).
     private const int TamanhoTrechoMensagem = 280;
 
-    private static string? ObterTrechoMensagem(string? conteudo) =>
-        conteudo is null
-            ? null
-            : conteudo.Length <= TamanhoTrechoMensagem
-                ? conteudo
-                : conteudo[..TamanhoTrechoMensagem];
+    // Fix wave 1 (MENOR-1/MENOR-6, lu-08-revisao.md frente 3/4): conteudo[..280]
+    // cortava por UNIDADE UTF-16 (System.String.Length), sem olhar limite de
+    // caractere — quando o corte caía no meio de um par substituto (emoji fora do BMP,
+    // 2 unidades UTF-16), sobrava um high surrogate solto. A G2 mediu o sintoma direto
+    // em Oracle real: item com "aaa…(279 'a')…�" no JSON (o serializador troca o
+    // surrogate solto por U+FFFD ao codificar em UTF-8). Itera por Rune (unidade
+    // Unicode completa, nunca quebra um par substituto) e para ANTES de estourar 280
+    // unidades UTF-16 — o resultado pode ter menos de 280 unidades quando o próximo
+    // Rune não caberia inteiro, nunca um surrogate partido.
+    private static string? ObterTrechoMensagem(string? conteudo)
+    {
+        if (conteudo is null)
+            return null;
+
+        if (conteudo.Length <= TamanhoTrechoMensagem)
+            return conteudo;
+
+        var builder = new StringBuilder();
+        var unidadesUsadas = 0;
+        foreach (var rune in conteudo.EnumerateRunes())
+        {
+            var unidadesRune = rune.Utf16SequenceLength;
+            if (unidadesUsadas + unidadesRune > TamanhoTrechoMensagem)
+                break;
+
+            builder.Append(rune.ToString());
+            unidadesUsadas += unidadesRune;
+        }
+
+        return builder.ToString();
+    }
 }

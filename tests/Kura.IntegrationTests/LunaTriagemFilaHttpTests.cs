@@ -303,4 +303,66 @@ public class LunaTriagemFilaHttpTests
         idsB.Should().Contain(idTriagemB);
         idsB.Should().NotContain(idTriagemA);
     }
+
+    /// <summary>
+    /// Fix wave 1 (IMPORTANTE-2, lu-08-revisao.md frentes 3/4): antes deste fix, a G2
+    /// reproduziu <c>HTTP 500</c> (<c>ORA-12899</c>) contra Oracle real com
+    /// <c>regras_versao</c> de 10 caracteres não-ASCII — a regra antiga (MaximumLength(10))
+    /// conta caracteres, a coluna é VARCHAR2(10 BYTE). Prova de ponta a ponta (pipeline
+    /// FluentValidation → AddFluentValidationAutoValidation, sem InMemory nem Oracle) de
+    /// que o mesmo payload agora devolve 400 declarado, nunca 500.
+    /// </summary>
+    [Fact]
+    public async Task RegistrarTriagem_RegrasVersaoMultibyteAcimaDoLimiteDeBytes_Retorna400NuncaMais500()
+    {
+        using var fabrica = new KuraApiFactory();
+        var apiKey = ClienteApiKey(fabrica);
+        var tutorId = await SemearTutorAsync(fabrica, 9301, KuraApiFactory.IdClinicaSemeada, "Tutor bytes");
+        var idInteracao = await RegistrarInteracaoAsync(apiKey, tutorId, "Mensagem qualquer");
+
+        var corpo = new
+        {
+            id_interacao = idInteracao,
+            id_tutor = tutorId,
+            sintomas = new[] { "sintoma" },
+            ds_urgencia = "BAIXA",
+            nr_score = 10,
+            ds_recomendacao = "Orientação automática — não substitui avaliação veterinária",
+            regras_versao = new string('ã', 6), // 6 chars / 12 bytes UTF-8 > VARCHAR2(10 BYTE)
+        };
+
+        var resposta = await apiKey.PostAsJsonAsync("/api/v1/luna/triage", corpo);
+
+        resposta.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            await resposta.Content.ReadAsStringAsync());
+    }
+
+    /// <summary>
+    /// Fix wave 1 (IMPORTANTE-2): antes deste fix, a G2 reproduziu <c>HTTP 500</c>
+    /// (<c>ORA-01438</c>) contra Oracle real com <c>nr_score=100000</c> — não havia
+    /// NENHUMA regra de faixa no validator. NUMBER(5) máximo é 99999.
+    /// </summary>
+    [Fact]
+    public async Task RegistrarTriagem_NrScoreAcimaDoLimiteDaColuna_Retorna400NuncaMais500()
+    {
+        using var fabrica = new KuraApiFactory();
+        var apiKey = ClienteApiKey(fabrica);
+        var tutorId = await SemearTutorAsync(fabrica, 9302, KuraApiFactory.IdClinicaSemeada, "Tutor score");
+        var idInteracao = await RegistrarInteracaoAsync(apiKey, tutorId, "Mensagem qualquer");
+
+        var corpo = new
+        {
+            id_interacao = idInteracao,
+            id_tutor = tutorId,
+            sintomas = new[] { "sintoma" },
+            ds_urgencia = "BAIXA",
+            nr_score = 100000, // NUMBER(5) máximo é 99999
+            ds_recomendacao = "Orientação automática — não substitui avaliação veterinária",
+        };
+
+        var resposta = await apiKey.PostAsJsonAsync("/api/v1/luna/triage", corpo);
+
+        resposta.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            await resposta.Content.ReadAsStringAsync());
+    }
 }

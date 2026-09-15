@@ -954,4 +954,35 @@ public class LunaServiceTests
 
         await act.Should().NotThrowAsync();
     }
+
+    /// <summary>
+    /// Fix wave 1 (IMPORTANTE-1, lu-08-revisao.md frentes 4/5): o InMemory do EF PRESERVA
+    /// Kind=Utc, então um teste de ponta a ponta contra InMemory nunca reproduziria o
+    /// bug — só o Oracle real devolve TIMESTAMP(6) como Kind=Unspecified. Este teste morde
+    /// no nível do repositório MOCKADO, devolvendo de propósito um DateTime com
+    /// Kind=Unspecified (simulando o que o provider Oracle do EF entrega) e provando que
+    /// LunaService restaura Kind=Utc antes de compor o DTO — e que a serialização JSON
+    /// resultante termina em "Z". Mordida: remover o DateTime.SpecifyKind em
+    /// MapearItemLista faz este teste falhar nominalmente (Kind continua Unspecified).
+    /// </summary>
+    [Fact]
+    public async Task ListarTriagensAsync_DtTriagemUnspecifiedDoRepositorio_DtoSaiComKindUtcESerializaComZ()
+    {
+        var dtUnspecified = DateTime.SpecifyKind(
+            new DateTime(2026, 9, 15, 0, 51, 29, 257), DateTimeKind.Unspecified);
+        var item = new Kura.Domain.ValueObjects.TriagemListaItem(
+            1, dtUnspecified, "ALTA", [], null, null, false, null, null, [], null);
+
+        _triagemRepoMock
+            .Setup(r => r.ListarPorClinicaAsync(It.IsAny<long>(), null, null, null, 1, 20))
+            .ReturnsAsync(((IReadOnlyList<Kura.Domain.ValueObjects.TriagemListaItem>)[item], 1));
+
+        var resultado = await _sut.ListarTriagensAsync(null, null, null, 1, 20);
+
+        var dto = resultado.Items.Single();
+        dto.DtTriagem.Kind.Should().Be(DateTimeKind.Utc,
+            "Oracle devolve Unspecified; o service tem de restaurar Utc antes de compor o DTO");
+        JsonSerializer.Serialize(dto.DtTriagem).Should().EndWith("Z\"",
+            "sem Kind=Utc, System.Text.Json omite o offset e o app interpreta como hora local");
+    }
 }

@@ -131,11 +131,21 @@ public sealed class LunaService : ILunaService
         };
     }
 
+    // Fix wave 1 (IMPORTANTE-1, lu-08-revisao.md frentes 4/5): DT_TRIAGEM é gravado com
+    // DateTime.UtcNow (RegistrarTriagemAsync), mas o provider Oracle do EF devolve
+    // TIMESTAMP(6) como DateTimeKind.Unspecified — confirmado em Oracle real pela G2
+    // ("2026-09-15T00:51:29.257834", sem "Z"; o mesmo teste em InMemory preserva
+    // Kind=Utc e NUNCA reproduz isto). System.Text.Json só emite o sufixo "Z" para
+    // Kind=Utc; sem ele, o app (LU-09, JS) interpreta a string como hora LOCAL — 3h de
+    // erro no fuso do compose (America/Sao_Paulo, UTC-3). SpecifyKind é seguro aqui
+    // porque a coluna É sempre UTC na escrita (nunca outro fuso) — não é uma conversão,
+    // é restaurar a marcação que o Oracle perde. Corrigido só na leitura deste DTO
+    // (não no converter global do EF, que afetaria outras entidades — fora de escopo).
     private static TriagemListaItemDto MapearItemLista(TriagemListaItem item) =>
         new()
         {
             IdTriagem = item.IdTriagem,
-            DtTriagem = item.DtTriagem,
+            DtTriagem = DateTime.SpecifyKind(item.DtTriagem, DateTimeKind.Utc),
             Urgencia = item.Urgencia,
             Sintomas = [.. item.Sintomas],
             Score = item.Score,
