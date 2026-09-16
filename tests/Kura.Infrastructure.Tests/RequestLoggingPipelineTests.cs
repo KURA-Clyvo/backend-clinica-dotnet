@@ -53,13 +53,28 @@ public class RequestLoggingPipelineTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         var serilogLogger = new LoggerConfiguration()
-            .MinimumLevel.Verbose()
+            // LU-16 (A4): Information, não Verbose — é o nível real de produção
+            // (Serilog cai no default Information porque appsettings.json só declara a
+            // seção "Logging", que .ReadFrom.Configuration() do Serilog NUNCA lê; ver
+            // comentário em Program.cs). Um harness em Verbose enxergaria linhas que a
+            // produção nunca emite (ex.: "All hosts are allowed." do HostFiltering, em
+            // nível Trace, que carrega RequestPath cru) — teste "vermelho" por um
+            // vazamento que não existe em produção não prova nada sobre o achado A4.
+            .MinimumLevel.Information()
+            // LU-16 (A4): espelha o MinimumLevel.Override de Program.cs — sem isto, este
+            // harness não reproduz o comportamento real e um teste "verde" aqui não
+            // provaria nada sobre produção (a mesma armadilha que already exige espelhar
+            // Enrich.FromLogContext() abaixo).
+            .MinimumLevel.Override("Microsoft.AspNetCore.Hosting.Diagnostics", LogEventLevel.Warning)
             // S3D-01: precisa espelhar Program.cs (Enrich.FromLogContext() em Program.cs:22)
             // para que LogContext.PushProperty("TraceId", ...) — empurrado pelo middleware
             // registrado em UseRequestLoggingAndExceptionHandling() — realmente apareça nas
             // propriedades estruturadas dos LogEvent capturados por este harness. Sem esta
             // linha, o middleware roda mas o sink nunca vê a propriedade.
             .Enrich.FromLogContext()
+            // LU-16 (A4): espelha o enricher de Program.cs — é ele que prova o achado A4
+            // (ver GetTelefone_QualquerStatus_TelefoneNaoApareceEmNenhumLogEvent abaixo).
+            .Enrich.With<RedigirRequestPathEnricher>()
             .WriteTo.Sink(_sink)
             .CreateLogger();
 
@@ -86,6 +101,19 @@ public class RequestLoggingPipelineTests : IAsyncLifetime
         app.MapGet("/nao-encontrado", () => { throw new EntidadeNaoEncontradaException("Pet", 42); });
         app.MapGet("/nao-mapeada", () => { throw new InvalidOperationException("bug genuíno não mapeado"); });
         app.MapGet("/ok", () => Results.Ok("tudo certo"));
+
+        // LU-16 (A4): mesma rota sensível de produção (TutorLunaController — GET
+        // /api/v1/tutores/telefone/{numero}), no CAMINHO FELIZ (sem exceção) e sem
+        // exceção mapeada — é exatamente o que o achado A4 mediu 0→4 gravações do
+        // telefone. Os 3 números escolhem o desfecho (200/404/500) sem que a mensagem
+        // da exceção em si carregue o telefone — só o PATH carrega, de propósito, pra
+        // isolar o vazamento que o teste precisa provar.
+        app.MapGet("/api/v1/tutores/telefone/{numero}", (string numero) => numero switch
+        {
+            "11999990000" => Results.Ok(new { idTutor = 1 }),
+            "22999990000" => throw new EntidadeNaoEncontradaException("Tutor", 1),
+            _ => throw new InvalidOperationException("erro não mapeado, sem telefone na mensagem"),
+        });
 
         // S3D-01: rota que emite uma linha de log DE NEGÓCIO no meio do processamento
         // (distinta da linha de conclusão que o Serilog.AspNetCore emite sozinho), para
@@ -232,5 +260,61 @@ public class RequestLoggingPipelineTests : IAsyncLifetime
         traceIdDoNegocio.Should().Be(traceIdDaConclusao,
             "S3D-01: correlação de requisição — duas linhas distintas da mesma requisição HTTP " +
             "devem compartilhar o mesmo TraceId, não só a linha de conclusão");
+    }
+
+    /// <summary>
+    /// LU-16 G4 (achado A4, BLOQUEANTE): antes deste fix, uma chamada a GET
+    /// /api/v1/tutores/telefone/{numero} — o CAMINHO FELIZ, sem exceção — fazia o
+    /// telefone do tutor aparecer CRU em toda linha de log da requisição (medido pelo
+    /// revisor: 0→4 gravações com uma única chamada 404 real). Este teste procura o
+    /// telefone em QUALQUER LogEvent capturado — mensagem renderizada E valores de
+    /// propriedade — não só na linha "responded", porque o vazamento original vinha de
+    /// TRÊS fontes (a linha de conclusão do Serilog.AspNetCore, "Request starting" e
+    /// "Request finished" do Microsoft.AspNetCore.Hosting.Diagnostics).
+    /// </summary>
+    [Theory]
+    [InlineData("11999990000", System.Net.HttpStatusCode.OK)]
+    [InlineData("22999990000", System.Net.HttpStatusCode.NotFound)]
+    [InlineData("33999990000", System.Net.HttpStatusCode.InternalServerError)]
+    public async Task GetTelefone_QualquerStatus_TelefoneNaoApareceEmNenhumLogEvent(
+        string numero, System.Net.HttpStatusCode statusEsperado)
+    {
+        var response = await _client.GetAsync($"/api/v1/tutores/telefone/{numero}");
+        response.StatusCode.Should().Be(statusEsperado);
+
+        _sink.Events.Should().NotBeEmpty();
+
+        foreach (var evento in _sink.Events)
+        {
+            evento.RenderMessage().Should().NotContain(numero,
+                $"telefone não pode aparecer na mensagem renderizada (nível {evento.Level}, " +
+                $"template \"{evento.MessageTemplate.Text}\")");
+
+            foreach (var (nome, valor) in evento.Properties)
+            {
+                valor.ToString().Should().NotContain(numero,
+                    $"telefone não pode aparecer na propriedade estruturada '{nome}' " +
+                    $"(nível {evento.Level}, template \"{evento.MessageTemplate.Text}\")");
+            }
+        }
+
+        // Regressão: a linha de conclusão continua existindo e com o marcador de
+        // redação — não é "logar nada", é "logar sem o número".
+        var linha = EncontrarLinhaDeRequestLogging();
+        linha.RenderMessage().Should().Contain("/api/v1/tutores/telefone/{redacted}");
+    }
+
+    /// <summary>
+    /// Regressão da S3D-01: a mutação de <c>context.Request.Path</c> feita pelo fix da
+    /// A4 não pode quebrar o TraceId (LU-16) nem apagar path útil de rota SEM PII.
+    /// </summary>
+    [Fact]
+    public async Task OutraRota_SemPii_ContinuaCompletaMesmoComOFixDoA4Ativo()
+    {
+        var response = await _client.GetAsync("/ok");
+        response.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
+
+        var linha = EncontrarLinhaDeRequestLogging();
+        linha.RenderMessage().Should().Contain("/ok");
     }
 }

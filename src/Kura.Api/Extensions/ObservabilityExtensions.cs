@@ -100,7 +100,23 @@ public static class ObservabilityExtensions
                 serviceVersion: VersaoServico))
             .WithTracing(t => t
                 .AddSource(KuraActivitySource.NomeFonte)
-                .AddAspNetCoreInstrumentation()
+                // LU-16 G4 (achado A4, BLOQUEANTE): AddAspNetCoreInstrumentation() marca a
+                // tag `url.path` com context.Request.Path CRU no span de servidor — o
+                // AddConsoleExporter() abaixo IMPRIME essa tag, então GET
+                // /api/v1/tutores/telefone/{numero} vazava o telefone do tutor por esta
+                // via também (achado, não deduzido: medido em docker logs, linha
+                // "url.path: /api/v1/tutores/telefone/<numero>"). EnrichWithHttpRequest
+                // reaproveita a MESMA RedigirPathSensivel do ExceptionHandlerMiddleware —
+                // sem duplicar a regra — e roda em OnStartActivity, DEPOIS que a
+                // instrumentação já setou a tag default, então activity.SetTag aqui
+                // SOBRESCREVE o valor cru pelo redigido antes de qualquer exportação.
+                .AddAspNetCoreInstrumentation(options =>
+                {
+                    options.EnrichWithHttpRequest = (activity, request) =>
+                        activity.SetTag(
+                            "url.path",
+                            Kura.Api.Middlewares.ExceptionHandlerMiddleware.RedigirPathSensivel(request.Path));
+                })
                 .AddHttpClientInstrumentation()
                 .AddConsoleExporter())
             .WithMetrics(m => m

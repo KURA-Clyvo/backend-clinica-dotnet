@@ -21,9 +21,25 @@ var builder = WebApplication.CreateBuilder(args);
 // de leitura. Caminho relativo ("logs/") funciona tanto local (fica ao lado do binário
 // em execução) quanto em container (relativo ao WORKDIR da imagem), sem exigir volume
 // dedicado nem configuração adicional.
+// LU-16 G4 (achado A4, BLOQUEANTE): appsettings.json declara
+// "Logging:LogLevel:Microsoft.AspNetCore": "Warning" — mas .ReadFrom.Configuration()
+// do Serilog.Settings.Configuration só lê a seção "Serilog:...", nunca a seção
+// "Logging:..." (convenção do Microsoft.Extensions.Logging puro). Por isso aquele
+// override nunca chegava a valer para o Serilog, e
+// Microsoft.AspNetCore.Hosting.Diagnostics (categoria que emite "Request starting"/
+// "Request finished" em nível Information, sempre com context.Request.Path CRU —
+// GET /api/v1/tutores/telefone/{numero} carrega o telefone do tutor no próprio path)
+// vazava o telefone em log a cada requisição bem-sucedida. O Override abaixo torna
+// o intent já declarado em appsettings.json efetivo de verdade para o Serilog —
+// não inventa configuração nova, corrige a que já existia e estava inerte.
 builder.Host.UseSerilog((ctx, sp, cfg) => cfg
     .ReadFrom.Configuration(ctx.Configuration)
+    .MinimumLevel.Override("Microsoft.AspNetCore.Hosting.Diagnostics", Serilog.Events.LogEventLevel.Warning)
     .Enrich.FromLogContext()
+    // LU-16 G4 (achado A4, BLOQUEANTE): redige qualquer propriedade RequestPath/Path
+    // de PII antes de qualquer sink ver o LogEvent — ver o XML doc do enricher para o
+    // porquê de ser global e não só no MessageTemplate do UseSerilogRequestLogging.
+    .Enrich.With<Kura.Api.Extensions.RedigirRequestPathEnricher>()
     .WriteTo.Console()
     .WriteTo.File("logs/kura-api-.log", rollingInterval: RollingInterval.Day));
 

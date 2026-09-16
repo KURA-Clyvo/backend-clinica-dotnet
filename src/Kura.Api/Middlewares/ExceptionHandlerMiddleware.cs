@@ -16,9 +16,35 @@ namespace Kura.Api.Middlewares;
 /// (TASK-67) carrega o telefone do tutor **no próprio path**, não no body — então
 /// qualquer exceção nesse endpoint (timeout Oracle, NRE, o que for) gravava o telefone
 /// cru no log de aplicação, violação direta da restrição de LGPD deste projeto. Fix:
-/// <see cref="RedigirPathSensivel"/> redige o segmento variável antes de logar. O
+/// <see cref="RedigirPathSensivel(PathString)"/> redige o segmento variável antes de logar. O
 /// corpo da resposta HTTP (`problem.title = ex.Message`) nunca incluiu o path, então
 /// não precisou de mudança.
+///
+/// LU-16 G4 (achado A4, BLOQUEANTE): o fix acima só cobria o caminho de EXCEÇÃO — o
+/// caminho FELIZ (200/404/... sem exceção, que é o que roda em TODA chamada da Luna)
+/// nunca passava por <see cref="RedigirPathSensivel(PathString)"/>. Medido: uma chamada 404 gravava
+/// o telefone 4× — na linha de conclusão do <c>UseSerilogRequestLogging</c>
+/// (propriedade <c>RequestPath</c>), em "Request starting"/"Request finished" do
+/// <c>Microsoft.AspNetCore.Hosting.Diagnostics</c> (propriedade <c>Path</c>) e na tag
+/// <c>url.path</c> exportada pelo OpenTelemetry. Nenhuma dessas 3 fontes chama este
+/// middleware — a correção não é aqui. Fix real, nos 3 lugares certos:
+/// <list type="number">
+/// <item><description><see cref="Kura.Api.Extensions.RedigirRequestPathEnricher"/> —
+/// enricher global do Serilog (registrado em <c>Program.cs</c>) que reescreve QUALQUER
+/// propriedade <c>RequestPath</c>/<c>Path</c> de QUALQUER <c>LogEvent</c>, reaproveitando
+/// esta mesma <see cref="RedigirPathSensivel(string?)"/>. Cobre a linha de conclusão do Serilog E
+/// a scope ambiente que o ASP.NET Core hosting empurra (<c>HostingLogScope</c>) — que
+/// carrega <c>RequestPath</c> em TODO log emitido durante a requisição, inclusive
+/// "Executing endpoint", achado ao escrever o teste desta task, não previsto no brief.</description></item>
+/// <item><description><c>Program.cs</c>: <c>MinimumLevel.Override("Microsoft.AspNetCore.Hosting.Diagnostics", Warning)</c>
+/// — suprime "Request starting"/"Request finished" (nível Information sempre, então some
+/// para todo status), tornando efetivo o <c>appsettings.json</c> que já declarava essa
+/// intenção sem nunca valer para o Serilog.</description></item>
+/// <item><description><c>ObservabilityExtensions.AddKuraObservability</c>:
+/// <c>EnrichWithHttpRequest</c> sobrescreve a tag <c>url.path</c> do
+/// <c>OpenTelemetry.Instrumentation.AspNetCore</c> antes do <c>AddConsoleExporter()</c>
+/// imprimir.</description></item>
+/// </list>
 /// </summary>
 public class ExceptionHandlerMiddleware
 {
@@ -55,9 +81,19 @@ public class ExceptionHandlerMiddleware
     /// "/api/v1/tutores/telefone/5511999990000" vira
     /// "/api/v1/tutores/telefone/{redacted}"; qualquer outro path passa intocado.
     /// </summary>
-    public static string RedigirPathSensivel(PathString path)
+    public static string RedigirPathSensivel(PathString path) => RedigirPathSensivel(path.Value ?? string.Empty);
+
+    /// <summary>
+    /// Overload em <see cref="string"/> puro — usado pelo
+    /// <see cref="Kura.Api.Extensions.RedigirRequestPathEnricher"/> (LU-16/A4), que lê o
+    /// valor já como <c>string</c> de uma propriedade de <c>LogEvent</c> e não deveria
+    /// reconstruir um <see cref="PathString"/> só para chamar a sobrecarga acima (um
+    /// valor de propriedade sem "/" no início, ex. um <c>RawTarget</c> com query string
+    /// mal formada, faria o construtor de <see cref="PathString"/> lançar).
+    /// </summary>
+    public static string RedigirPathSensivel(string? path)
     {
-        var valor = path.Value ?? string.Empty;
+        var valor = path ?? string.Empty;
         foreach (var marcador in SegmentosSensiveis)
         {
             var indice = valor.IndexOf(marcador, StringComparison.OrdinalIgnoreCase);
