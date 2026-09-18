@@ -57,6 +57,8 @@ builder.Services.AddKuraHealthChecks(builder.Configuration);
 // Console). Ver Extensions/ObservabilityExtensions.cs para a decisão de cobertura
 // (por que EntityFrameworkCore/Prometheus ficaram de fora).
 builder.Services.AddKuraObservability();
+// CORS do app da clínica na web — ver Extensions/CorsExtensions.cs.
+builder.Services.AddKuraCors(builder.Configuration);
 
 // JWT
 var jwtKey = builder.Configuration["Jwt:Key"]
@@ -172,6 +174,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseKuraCors();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
