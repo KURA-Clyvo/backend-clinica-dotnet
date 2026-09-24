@@ -8,6 +8,7 @@ using Kura.Domain.Interfaces;
 using Kura.Infrastructure.Persistence;
 using Kura.Infrastructure.Persistence.Interceptors;
 using Kura.Infrastructure.Persistence.Repositories;
+using Kura.Infrastructure.Storage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -101,6 +102,21 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITriagemLunaRepository, TriagemLunaRepository>();
         services.AddScoped<IInviteTutorRepository, InviteTutorRepository>();
         services.AddScoped<IConsentimentoRepository, ConsentimentoRepository>();
+
+        // FT-02 (backlog KURA_BACKLOG_FOTO_PET.md): armazenamento de arquivo (foto de pet,
+        // hoje) e URL assinada. ArmazenamentoLocalDisco reaproveita Storage:BasePath (mesma
+        // config de ReceituarioPdfService). O segredo de assinatura é validado AQUI, de
+        // forma síncrona e eager — mesmo padrão de Jwt:Key em Program.cs — para que
+        // segredo ausente ou curto demais derrube o processo na partida, nunca no primeiro
+        // upload/download de foto.
+        var fotoUrlSecret = configuration["Foto:UrlSecret"]
+            ?? throw new InvalidOperationException("Foto:UrlSecret not configured.");
+        if (System.Text.Encoding.UTF8.GetByteCount(fotoUrlSecret) < 32)
+            throw new InvalidOperationException(
+                "Foto:UrlSecret must be at least 32 bytes (UTF-8).");
+
+        services.AddScoped<IArmazenamentoArquivos, ArmazenamentoLocalDisco>();
+        services.AddScoped<IAssinadorUrlFoto>(_ => new AssinadorUrlFotoHmac(fotoUrlSecret));
 
         services.AddHttpClient<IDailyService, DailyService>((sp, http) =>
         {

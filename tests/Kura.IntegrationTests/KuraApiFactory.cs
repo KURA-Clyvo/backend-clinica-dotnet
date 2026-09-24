@@ -209,6 +209,10 @@ public class KuraApiFactory : WebApplicationFactory<Program>
         // e de IoT não morram com InvalidOperationException se algum teste os exercitar.
         builder.UseSetting("Luna:ApiKey", "luna-api-key-de-integracao");
         builder.UseSetting("IoT:ApiKey", "iot-api-key-de-integracao");
+        // FT-02 (backlog KURA_BACKLOG_FOTO_PET.md): AddInfrastructure passou a exigir
+        // Foto:UrlSecret com >= 32 bytes UTF-8, fail-fast na partida — sem esta linha a
+        // fábrica inteira morre com InvalidOperationException antes de qualquer teste rodar.
+        builder.UseSetting("Foto:UrlSecret", "chave-de-integracao-ft02-com-mais-de-32-bytes");
 
         builder.ConfigureServices(services =>
         {
