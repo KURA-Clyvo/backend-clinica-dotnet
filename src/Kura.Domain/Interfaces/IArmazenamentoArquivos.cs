@@ -17,9 +17,9 @@ namespace Kura.Domain.Interfaces;
 /// <para>Vive em <c>Kura.Domain.Interfaces</c>, não em <c>Kura.Application</c>, porque
 /// <c>Kura.Infrastructure</c> (onde a implementação de disco mora) só referencia
 /// <c>Kura.Domain</c> e <c>Kura.CrossCutting</c> — o mesmo motivo que já colocou
-/// <see cref="IUnitOfWork"/> e <see cref="IClinicaContext"/> aqui em vez de em
-/// <c>Kura.Application.Services.Interfaces</c> (onde vivem os serviços de negócio,
-/// implementados dentro do próprio <c>Kura.Application</c>).</para>
+/// <see cref="IUnitOfWork"/> aqui (implementado em <c>Kura.Infrastructure/Persistence</c>)
+/// em vez de em <c>Kura.Application.Services.Interfaces</c> (onde vivem os serviços de
+/// negócio, implementados dentro do próprio <c>Kura.Application</c>).</para>
 /// </summary>
 public interface IArmazenamentoArquivos
 {
