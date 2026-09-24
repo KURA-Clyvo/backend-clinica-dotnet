@@ -30,6 +30,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IVeterinarioService, VeterinarioService>();
         services.AddScoped<ITutorService, TutorService>();
         services.AddScoped<IPetService, PetService>();
+        // FT-03 (backlog KURA_BACKLOG_FOTO_PET.md): consome IArmazenamentoArquivos (FT-02),
+        // registrado em AddInfrastructure.
+        services.AddScoped<IPetFotoService, PetFotoService>();
 
         // GROUP C — Clinical events
         services.AddScoped<IEventoClinicoService, EventoClinicoService>();

@@ -46,6 +46,15 @@ public class PetConfiguration : IEntityTypeConfiguration<Pet>
             .HasColumnName("SG_PORTE")
             .HasColumnType("CHAR(1)");
 
+        // FT-01 (backend-tutor-java, V22__pet_foto.sql) já criou as 2 colunas no Oracle —
+        // Flyway é a única autoridade de DDL deste projeto (CLAUDE.md); aqui só mapeamos.
+        builder.Property(e => e.DsFotoChave)
+            .HasColumnName("DS_FOTO_CHAVE")
+            .HasMaxLength(500);
+
+        builder.Property(e => e.DtFotoAtualizacao)
+            .HasColumnName("DT_FOTO_ATUALIZACAO");
+
         builder.Property(e => e.StAtiva)
             .HasColumnName("ST_ATIVO")
             .HasColumnType("CHAR(1)")
