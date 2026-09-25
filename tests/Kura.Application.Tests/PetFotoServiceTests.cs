@@ -31,8 +31,8 @@ public class PetFotoServiceTests
     {
         _petRepoMock.Setup(r => r.GetByIdAsync(99L)).ReturnsAsync((Pet?)null);
 
-        var thumb = FormFileFixtures.CriarArquivo(FormFileFixtures.WebpValido, "thumb", "image/webp");
-        var media = FormFileFixtures.CriarArquivo(FormFileFixtures.WebpValido, "media", "image/webp");
+        var thumb = FormFileFixtures.CriarStream(FormFileFixtures.WebpValido);
+        var media = FormFileFixtures.CriarStream(FormFileFixtures.WebpValido);
 
         var act = async () => await _sut.UploadFotoAsync(99L, thumb, media, CancellationToken.None);
 
@@ -56,8 +56,8 @@ public class PetFotoServiceTests
             "png" => FormFileFixtures.PngValido,
             _ => FormFileFixtures.WebpValido,
         };
-        var thumb = FormFileFixtures.CriarArquivo(bytes, "thumb", "application/octet-stream");
-        var media = FormFileFixtures.CriarArquivo(bytes, "media", "application/octet-stream");
+        var thumb = FormFileFixtures.CriarStream(bytes);
+        var media = FormFileFixtures.CriarStream(bytes);
 
         Pet? atualizado = null;
         _petRepoMock.Setup(r => r.Update(It.IsAny<Pet>())).Callback<Pet>(p => atualizado = p);
@@ -83,9 +83,20 @@ public class PetFotoServiceTests
 
     /// <summary>
     /// Mordida do aceite 5: a ordem tem que ser salva→commit→exclui. Prova positiva de que,
-    /// COM foto anterior, os arquivos antigos SÃO excluídos (a mordida "exclusão antes do
-    /// commit perde foto antiga" é provada por teste de integração, que consegue fazer o
-    /// SaveChanges falhar de verdade — aqui provamos a ORDEM RELATIVA das chamadas de mock).
+    /// COM foto anterior, os arquivos antigos SÃO excluídos, e a ORDEM relativa é a certa.
+    ///
+    /// <para>🔴 <b>Fix wave G2 (g2-ft03.md, achado G2-a).</b> A versão anterior usava
+    /// <c>MockSequence</c> sobre mocks <c>Loose</c> — Loose NÃO lança em chamada fora de
+    /// ordem (a setup fora de sequência simplesmente deixa de casar e o mock devolve o
+    /// default), então a mutação que INVERTE a ordem real (mover a exclusão para ANTES do
+    /// commit) ficava VERDE aqui, sem morder nada; a proteção real era só o teste de
+    /// commit-falho (<see cref="UploadFotoAsync_CommitFalha_NuncaExcluiFotoAntiga"/>). Trocado
+    /// por uma lista de ordem real, populada por <c>Callback</c> em cada chamada — funciona
+    /// com mocks Loose (não precisa de <c>MockBehavior.Strict</c>, que quebraria os outros
+    /// testes desta classe que dependem do default Loose para chamadas não configuradas) e
+    /// morde de verdade: reordenar o código de produção muda a ordem gravada na lista, e o
+    /// <c>Should().Equal(...)</c> falha. Mordida aplicada e revertida nesta fix wave — ver o
+    /// relatório da task.</para>
     /// </summary>
     [Fact]
     public async Task UploadFotoAsync_ComFotoAnterior_ExcluiVariantesAntigasSoDepoisDoCommit()
@@ -93,20 +104,29 @@ public class PetFotoServiceTests
         const string chaveAntiga = "clinica/1/pet/1/antigo-uuid.webp";
         SetupPet(1L, dsFotoChave: chaveAntiga);
 
-        var sequencia = new MockSequence();
-        _uowMock.InSequence(sequencia).Setup(u => u.CommitAsync()).ReturnsAsync(1);
-        _armazenamentoMock.InSequence(sequencia)
+        var ordem = new List<string>();
+        _uowMock.Setup(u => u.CommitAsync())
+            .Callback(() => ordem.Add("commit"))
+            .ReturnsAsync(1);
+        _armazenamentoMock
             .Setup(a => a.ExcluirAsync("clinica/1/pet/1/antigo-uuid_256.webp", It.IsAny<CancellationToken>()))
+            .Callback(() => ordem.Add("excluir_thumb"))
             .Returns(Task.CompletedTask);
-        _armazenamentoMock.InSequence(sequencia)
+        _armazenamentoMock
             .Setup(a => a.ExcluirAsync("clinica/1/pet/1/antigo-uuid_1080.webp", It.IsAny<CancellationToken>()))
+            .Callback(() => ordem.Add("excluir_media"))
             .Returns(Task.CompletedTask);
 
-        var thumb = FormFileFixtures.CriarArquivo(FormFileFixtures.WebpValido, "thumb", "image/webp");
-        var media = FormFileFixtures.CriarArquivo(FormFileFixtures.WebpValido, "media", "image/webp");
+        var thumb = FormFileFixtures.CriarStream(FormFileFixtures.WebpValido);
+        var media = FormFileFixtures.CriarStream(FormFileFixtures.WebpValido);
 
         await _sut.UploadFotoAsync(1L, thumb, media, CancellationToken.None);
 
+        ordem.Should().Equal(
+            ["commit", "excluir_thumb", "excluir_media"],
+            "o commit precisa acontecer ANTES de qualquer exclusão da foto antiga — se o " +
+            "commit falhar, a linha do pet continua apontando pra foto antiga e excluí-la " +
+            "seria perder um dado que o banco ainda diz existir");
         _armazenamentoMock.Verify(a => a.ExcluirAsync(
             "clinica/1/pet/1/antigo-uuid_256.webp", It.IsAny<CancellationToken>()), Times.Once);
         _armazenamentoMock.Verify(a => a.ExcluirAsync(
@@ -130,8 +150,8 @@ public class PetFotoServiceTests
         SetupPet(1L, dsFotoChave: chaveAntiga);
         _uowMock.Setup(u => u.CommitAsync()).ThrowsAsync(new InvalidOperationException("Oracle indisponível (simulado)"));
 
-        var thumb = FormFileFixtures.CriarArquivo(FormFileFixtures.WebpValido, "thumb", "image/webp");
-        var media = FormFileFixtures.CriarArquivo(FormFileFixtures.WebpValido, "media", "image/webp");
+        var thumb = FormFileFixtures.CriarStream(FormFileFixtures.WebpValido);
+        var media = FormFileFixtures.CriarStream(FormFileFixtures.WebpValido);
 
         var act = async () => await _sut.UploadFotoAsync(1L, thumb, media, CancellationToken.None);
 
@@ -146,8 +166,8 @@ public class PetFotoServiceTests
     {
         SetupPet(1L, dsFotoChave: null);
 
-        var thumb = FormFileFixtures.CriarArquivo(FormFileFixtures.WebpValido, "thumb", "image/webp");
-        var media = FormFileFixtures.CriarArquivo(FormFileFixtures.WebpValido, "media", "image/webp");
+        var thumb = FormFileFixtures.CriarStream(FormFileFixtures.WebpValido);
+        var media = FormFileFixtures.CriarStream(FormFileFixtures.WebpValido);
 
         await _sut.UploadFotoAsync(1L, thumb, media, CancellationToken.None);
 
@@ -174,8 +194,8 @@ public class PetFotoServiceTests
                 It.Is<string>(k => k.Contains("_1080.")), It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("disco cheio (simulado)"));
 
-        var thumb = FormFileFixtures.CriarArquivo(FormFileFixtures.WebpValido, "thumb", "image/webp");
-        var media = FormFileFixtures.CriarArquivo(FormFileFixtures.WebpValido, "media", "image/webp");
+        var thumb = FormFileFixtures.CriarStream(FormFileFixtures.WebpValido);
+        var media = FormFileFixtures.CriarStream(FormFileFixtures.WebpValido);
 
         var act = async () => await _sut.UploadFotoAsync(1L, thumb, media, CancellationToken.None);
 
@@ -194,8 +214,8 @@ public class PetFotoServiceTests
         // quem chamar o service diretamente, como este próprio teste faz.
         SetupPet(1L);
 
-        var thumb = FormFileFixtures.CriarArquivo(FormFileFixtures.JpegValido, "thumb", "image/jpeg");
-        var media = FormFileFixtures.CriarArquivo(FormFileFixtures.PngValido, "media", "image/png");
+        var thumb = FormFileFixtures.CriarStream(FormFileFixtures.JpegValido);
+        var media = FormFileFixtures.CriarStream(FormFileFixtures.PngValido);
 
         var act = async () => await _sut.UploadFotoAsync(1L, thumb, media, CancellationToken.None);
 

@@ -23,8 +23,8 @@ public class PetFotoUploadValidatorTests
 
         var dto = new PetFotoUploadDto
         {
-            Thumb = FormFileFixtures.CriarArquivo(bytes, "thumb", "application/octet-stream"),
-            Media = FormFileFixtures.CriarArquivo(bytes, "media", "application/octet-stream"),
+            Thumb = FormFileFixtures.CriarStream(bytes),
+            Media = FormFileFixtures.CriarStream(bytes),
         };
 
         var resultado = await _sut.ValidateAsync(dto);
@@ -39,7 +39,7 @@ public class PetFotoUploadValidatorTests
         var dto = new PetFotoUploadDto
         {
             Thumb = null,
-            Media = FormFileFixtures.CriarArquivo(FormFileFixtures.WebpValido, "media", "image/webp"),
+            Media = FormFileFixtures.CriarStream(FormFileFixtures.WebpValido),
         };
 
         var resultado = await _sut.ValidateAsync(dto);
@@ -53,7 +53,7 @@ public class PetFotoUploadValidatorTests
     {
         var dto = new PetFotoUploadDto
         {
-            Thumb = FormFileFixtures.CriarArquivo(FormFileFixtures.WebpValido, "thumb", "image/webp"),
+            Thumb = FormFileFixtures.CriarStream(FormFileFixtures.WebpValido),
             Media = null,
         };
 
@@ -68,8 +68,8 @@ public class PetFotoUploadValidatorTests
     {
         var dto = new PetFotoUploadDto
         {
-            Thumb = FormFileFixtures.CriarArquivo([], "thumb", "image/webp"),
-            Media = FormFileFixtures.CriarArquivo(FormFileFixtures.WebpValido, "media", "image/webp"),
+            Thumb = FormFileFixtures.CriarStream([]),
+            Media = FormFileFixtures.CriarStream(FormFileFixtures.WebpValido),
         };
 
         var resultado = await _sut.ValidateAsync(dto);
@@ -87,8 +87,8 @@ public class PetFotoUploadValidatorTests
     {
         var dto = new PetFotoUploadDto
         {
-            Thumb = FormFileFixtures.CriarArquivo(FormFileFixtures.BytesInvalidos, "thumb", "image/jpeg"),
-            Media = FormFileFixtures.CriarArquivo(FormFileFixtures.WebpValido, "media", "image/webp"),
+            Thumb = FormFileFixtures.CriarStream(FormFileFixtures.BytesInvalidos),
+            Media = FormFileFixtures.CriarStream(FormFileFixtures.WebpValido),
         };
 
         var resultado = await _sut.ValidateAsync(dto);
@@ -103,8 +103,8 @@ public class PetFotoUploadValidatorTests
         // Ruling F7-a do maestro (G2 g2-ft01-ft02.md): thumb JPEG + media PNG → 400.
         var dto = new PetFotoUploadDto
         {
-            Thumb = FormFileFixtures.CriarArquivo(FormFileFixtures.JpegValido, "thumb", "image/jpeg"),
-            Media = FormFileFixtures.CriarArquivo(FormFileFixtures.PngValido, "media", "image/png"),
+            Thumb = FormFileFixtures.CriarStream(FormFileFixtures.JpegValido),
+            Media = FormFileFixtures.CriarStream(FormFileFixtures.PngValido),
         };
 
         var resultado = await _sut.ValidateAsync(dto);

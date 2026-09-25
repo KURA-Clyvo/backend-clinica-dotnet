@@ -6,14 +6,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- FT-03 (KURA_BACKLOG_FOTO_PET.md): IFormFile (PetFotoUploadDto/ValidadorAssinaturaImagem)
-         vive em Microsoft.AspNetCore.Http.Features, que só chega via FrameworkReference —
-         este projeto usa o SDK de biblioteca comum (Microsoft.NET.Sdk), não Sdk.Web, e não
-         precisa virar um para consumir só os tipos de HTTP abstrato. -->
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
-  </ItemGroup>
-
-  <ItemGroup>
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
     <PackageReference Include="FluentValidation" Version="12.1.1" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.0" />

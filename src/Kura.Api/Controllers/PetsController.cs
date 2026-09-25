@@ -1,5 +1,6 @@
 namespace Kura.Api.Controllers;
 
+using FluentValidation;
 using Kura.Application.DTOs.EventoClinico;
 using Kura.Application.DTOs.Pet;
 using Kura.Application.DTOs.Vacina;
@@ -25,17 +26,20 @@ public class PetsController : ControllerBase
     private readonly IVacinaService _vacinaService;
     private readonly IEventoClinicoService _eventoService;
     private readonly IPetFotoService _petFotoService;
+    private readonly IValidator<PetFotoUploadDto> _validadorFoto;
 
     public PetsController(
         IPetService petService,
         IVacinaService vacinaService,
         IEventoClinicoService eventoService,
-        IPetFotoService petFotoService)
+        IPetFotoService petFotoService,
+        IValidator<PetFotoUploadDto> validadorFoto)
     {
         _petService = petService;
         _vacinaService = vacinaService;
         _eventoService = eventoService;
         _petFotoService = petFotoService;
+        _validadorFoto = validadorFoto;
     }
 
     /// <summary>
@@ -185,12 +189,41 @@ public class PetsController : ControllerBase
     /// grava as novas, atualiza a linha, só DEPOIS exclui as antigas.
     /// </summary>
     /// <param name="id">Identificador do pet.</param>
-    /// <param name="dto">Multipart com as partes <c>thumb</c> e <c>media</c>.</param>
+    /// <param name="ct">Token de cancelamento (encerra a leitura do corpo se a conexão cair).</param>
     /// <returns>Chave e data da foto gravada.</returns>
     /// <response code="200">Foto gravada com sucesso.</response>
     /// <response code="400">Parte ausente, vazia, ou bytes que não batem JPEG/PNG/WebP.</response>
     /// <response code="404">Pet não encontrado (ou pertence a outra clínica).</response>
     /// <response code="413">Corpo da requisição maior que o limite (2 MB).</response>
+    /// <remarks>
+    /// <para>🔴 <b>Fix wave G2 (g2-ft03.md, achado G2-e).</b> Este endpoint lê o multipart ELE
+    /// MESMO (<see cref="HttpRequest.ReadFormAsync(CancellationToken)"/>) em vez de receber
+    /// <c>[FromForm] PetFotoUploadDto</c> como parâmetro, porque <c>PetFotoUploadDto</c>
+    /// deixou de ter <c>IFormFile</c>/<c>[FromForm]</c> — <c>Kura.Application</c> não pode
+    /// depender de <c>Microsoft.AspNetCore.*</c>. A validação (magic bytes, presença,
+    /// tamanho) roda manualmente aqui via <see cref="_validadorFoto"/>.</para>
+    ///
+    /// <para>🔴 <b>Fix wave G2 (g2-ft03.md, achado G2-c) — ONDE o 413 de verdade é
+    /// produzido, e NÃO é aqui.</b> MEDIDO com diagnóstico (não deduzido): tirar
+    /// <c>[FromForm]</c> desta assinatura NÃO evita o <c>FormValueProviderFactory</c> do MVC
+    /// — ele chama <c>Request.ReadFormAsync()</c> para QUALQUER requisição
+    /// <c>multipart/form-data</c> que chega a UM controller action, incondicionalmente
+    /// (só olha <c>HttpRequest.HasFormContentType</c>, nunca os parâmetros da action), ANTES
+    /// da action ser invocada. Confirmado com um log na primeira linha deste método: ele
+    /// NUNCA é escrito quando o corpo excede o limite — a requisição morre antes de chegar
+    /// aqui. O fix real está em <c>Program.cs</c>
+    /// (<c>ApiBehaviorOptions.InvalidModelStateResponseFactory</c>): quando o Kestrel recusa
+    /// o corpo por <see cref="RequestSizeLimitAttribute"/>, o
+    /// <see cref="Microsoft.AspNetCore.Http.BadHttpRequestException"/>(413) (herda de
+    /// <see cref="IOException"/>) é capturado pelo <c>FormValueProviderFactory</c> e
+    /// embrulhado em <c>ValueProviderException</c>, que vira erro de ModelState — SÓ A
+    /// MENSAGEM sobrevive (<c>ModelError.Exception</c> é <see langword="null"/>, medido). O
+    /// factory customizado reconhece o texto ("Request body too large", produzido só pelo
+    /// Kestrel nesse cenário) e devolve 413 de verdade em vez do 400 automático. Provado com
+    /// <c>UseKestrel()</c> real: corpo maior que o limite → 413; corpo válido menor que o
+    /// limite → 200 (mesmo instrumento, controle positivo). Ver
+    /// <c>PetFotoKestrelHttpTests</c> e o relatório da task.</para>
+    /// </remarks>
     [HttpPost("{id:long}/foto")]
     [RequestSizeLimit(2 * 1024 * 1024)]
     [Consumes("multipart/form-data")]
@@ -198,13 +231,27 @@ public class PetsController : ControllerBase
     [ProducesResponseType(400)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
     [ProducesResponseType(413)]
-    public async Task<IActionResult> UploadFoto(long id, [FromForm] PetFotoUploadDto dto)
+    public async Task<IActionResult> UploadFoto(long id, CancellationToken ct)
     {
-        // ModelState já garante dto.Thumb/dto.Media não-nulos e validados por magic bytes
-        // (PetFotoUploadValidator, auto-validation) — o [ApiController] responde 400 antes
-        // deste método rodar se alguma regra falhar.
-        var result = await _petFotoService.UploadFotoAsync(
-            id, dto.Thumb!, dto.Media!, HttpContext.RequestAborted);
+        var form = await Request.ReadFormAsync(ct);
+
+        await using var streamThumb = form.Files["thumb"]?.OpenReadStream();
+        await using var streamMedia = form.Files["media"]?.OpenReadStream();
+
+        // Fix wave G2 (achado G2-e): PetFotoUploadDto deixou de ter IFormFile/[FromForm] —
+        // Kura.Application não pode depender de ASP.NET. Este controller monta o DTO com
+        // Stream puro e valida MANUALMENTE (a auto-validation do FluentValidation só reage a
+        // parâmetro bound por atributo, e este endpoint parou de ter um).
+        var dto = new PetFotoUploadDto { Thumb = streamThumb, Media = streamMedia };
+        var validacao = _validadorFoto.Validate(dto);
+        if (!validacao.IsValid)
+        {
+            foreach (var erro in validacao.Errors)
+                ModelState.AddModelError(erro.PropertyName, erro.ErrorMessage);
+            return ValidationProblem(ModelState);
+        }
+
+        var result = await _petFotoService.UploadFotoAsync(id, dto.Thumb!, dto.Media!, ct);
         return Ok(result);
     }
 }

@@ -43,11 +43,26 @@ public static class ChaveFotoPet
     /// Ex.: <c>Variante("clinica/7/pet/12/abc.webp", "256")</c> →
     /// <c>"clinica/7/pet/12/abc_256.webp"</c>.
     /// </summary>
+    /// <exception cref="ArgumentException">
+    /// 🔴 Fix wave G2 (g2-ft03.md, achado G2-f): <paramref name="chaveBase"/> sem ponto (sem
+    /// extensão) LANÇA em vez de devolver uma chave sem extensão em silêncio. A versão
+    /// anterior tinha um fallback silencioso ("defensivo; a base sempre tem extensão na
+    /// prática") que a G2 apontou como risco para quem replicar esta fórmula (FT-05/Java,
+    /// regra 11 do CLAUDE.md): uma chave sem extensão que sobrevive sem erro é pior do que
+    /// falhar cedo, porque <see cref="Base"/> SEMPRE produz chave com extensão — chegar aqui
+    /// sem ponto só pode significar uso indevido do helper (chave que não veio de
+    /// <see cref="Base"/>).
+    /// </exception>
     public static string Variante(string chaveBase, string sufixoTamanho)
     {
         var indicePonto = chaveBase.LastIndexOf('.');
         if (indicePonto < 0)
-            return $"{chaveBase}_{sufixoTamanho}"; // defensivo; a base sempre tem extensão na prática
+        {
+            throw new ArgumentException(
+                $"Chave base '{chaveBase}' não tem extensão — só chaves produzidas por " +
+                $"{nameof(ChaveFotoPet)}.{nameof(Base)}() são aceitas.",
+                nameof(chaveBase));
+        }
 
         var semExtensao = chaveBase[..indicePonto];
         var extensao = chaveBase[(indicePonto + 1)..];

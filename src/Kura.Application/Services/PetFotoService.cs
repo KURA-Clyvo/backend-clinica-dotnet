@@ -5,7 +5,6 @@ using Kura.Application.Services.Interfaces;
 using Kura.Domain.Exceptions;
 using Kura.Domain.Interfaces;
 using Kura.Domain.Storage;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
@@ -22,6 +21,10 @@ using Microsoft.Extensions.Logging;
 /// <para><b>Se o SEGUNDO arquivo (media) falhar ao salvar, o PRIMEIRO (thumb) já salvo é
 /// excluído</b> antes de propagar a exceção — nunca deixamos um arquivo novo órfão no disco
 /// por causa de uma escrita parcial.</para>
+///
+/// <para>🔴 <b>Fix wave G2 (g2-ft03.md, achado G2-e):</b> thumb/media chegam como
+/// <see cref="Stream"/> puro (não mais <c>IFormFile</c>) — quem abre e fecha os streams é o
+/// chamador (<c>PetsController</c>, Kura.Api). Este service NÃO os descarta.</para>
 /// </summary>
 public sealed class PetFotoService : IPetFotoService
 {
@@ -43,7 +46,7 @@ public sealed class PetFotoService : IPetFotoService
     }
 
     public async Task<PetFotoResponseDto> UploadFotoAsync(
-        long idPet, IFormFile thumb, IFormFile media, CancellationToken ct)
+        long idPet, Stream thumb, Stream media, CancellationToken ct)
     {
         // GetByIdAsync já é escopado por ApplyTenantFilters (Pet está entre as 8 entidades
         // do filtro de tenant) — pet de outra clínica não é encontrado aqui, 404 genuíno,
@@ -81,15 +84,13 @@ public sealed class PetFotoService : IPetFotoService
 
         var chaveBaseAntiga = pet.DsFotoChave; // captura ANTES de sobrescrever
 
-        await using (var streamThumb = thumb.OpenReadStream())
-        {
-            await _armazenamento.SalvarAsync(chaveThumbNova, streamThumb, contentType, ct);
-        }
+        // Detectar() (chamado acima, para formatoThumb/formatoMedia) já deixou os 2 streams
+        // reposicionados em 0 — prontos para esta leitura completa, sem reabrir nada.
+        await _armazenamento.SalvarAsync(chaveThumbNova, thumb, contentType, ct);
 
         try
         {
-            await using var streamMedia = media.OpenReadStream();
-            await _armazenamento.SalvarAsync(chaveMediaNova, streamMedia, contentType, ct);
+            await _armazenamento.SalvarAsync(chaveMediaNova, media, contentType, ct);
         }
         catch
         {

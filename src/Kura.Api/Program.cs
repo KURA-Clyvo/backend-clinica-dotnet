@@ -44,6 +44,54 @@ builder.Host.UseSerilog((ctx, sp, cfg) => cfg
     .WriteTo.File("logs/kura-api-.log", rollingInterval: RollingInterval.Day));
 
 builder.Services.AddControllers();
+// 🔴 Fix wave G2 da FT-03 (g2-ft03.md, achado G2-c — corpo > 2 MB devolvia 400, não 413).
+//
+// MEDIDO nesta fix wave, com diagnóstico (não deduzido): o FormValueProviderFactory do MVC
+// chama Request.ReadFormAsync() para QUALQUER requisição multipart/form-data que chega a
+// UM controller action, mesmo quando a action NÃO tem nenhum parâmetro [FromForm]/IFormFile
+// — a construção de value providers roda ANTES da invocação da action e é condicionada só
+// por HttpRequest.HasFormContentType, nunca pelos parâmetros da action. Confirmado com um
+// log na primeira linha de PetsController.UploadFoto: ele NUNCA é escrito quando o corpo
+// excede o limite — a requisição morre antes da action ser sequer invocada. Ou seja, tirar
+// o parâmetro [FromForm] da action (o que o texto original da G2 sugeria) NÃO evita o
+// problema — o FormValueProviderFactory já rodou e já falhou antes disso importar.
+//
+// Quando o Kestrel recusa o corpo por estourar [RequestSizeLimit], o
+// BadHttpRequestException(413) (herda de IOException) é capturado pelo
+// FormValueProviderFactory e embrulhado em ValueProviderException, que vira erro de
+// ModelState. MEDIDO: o ModelError resultante NÃO carrega o objeto da exceção original
+// (ModelError.Exception é null) — só a MENSAGEM sobrevive. Por isso a interceptação abaixo
+// casa pelo texto ("Request body too large"), não por tipo de exceção: é o único dado que
+// sobra para diferenciar este caso de qualquer outro erro de ModelState 400 genuíno. O
+// texto é produzido pelo próprio Kestrel só para este cenário — não colide com nenhuma
+// mensagem de validação deste projeto (todas em português).
+builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options =>
+{
+    var fabricaOriginal = options.InvalidModelStateResponseFactory;
+    options.InvalidModelStateResponseFactory = context =>
+    {
+        var erroDeTamanho = context.ModelState.Values
+            .SelectMany(entrada => entrada.Errors)
+            .FirstOrDefault(erro => erro.ErrorMessage.Contains(
+                "Request body too large", StringComparison.Ordinal));
+
+        if (erroDeTamanho is not null)
+        {
+            return new Microsoft.AspNetCore.Mvc.ObjectResult(new
+            {
+                type = nameof(Microsoft.AspNetCore.Http.BadHttpRequestException),
+                title = erroDeTamanho.ErrorMessage,
+                status = StatusCodes.Status413PayloadTooLarge,
+                traceId = context.HttpContext.TraceIdentifier,
+            })
+            {
+                StatusCode = StatusCodes.Status413PayloadTooLarge,
+            };
+        }
+
+        return fabricaOriginal(context);
+    };
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddFluentValidationAutoValidation();

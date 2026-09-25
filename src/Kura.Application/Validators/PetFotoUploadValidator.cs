@@ -9,13 +9,15 @@ using Kura.Application.Services;
 /// (<see cref="ValidadorAssinaturaImagem"/>) — nunca por <c>Content-Type</c>/extensão do
 /// cliente. FT-03/backlog <c>KURA_BACKLOG_FOTO_PET.md</c>, "Validação no servidor".
 ///
-/// <para><b>Como isto vira 400.</b> <c>Program.cs</c> já registra
-/// <c>AddFluentValidationAutoValidation()</c> + <c>[ApiController]</c> — nenhuma exceção de
-/// <c>Kura.Domain.Exceptions</c> mapeia 400 no <c>ExceptionHandlerMiddleware</c> (só 404/422/
-/// 409/401/500), então esta task reaproveita o MESMO mecanismo que já produz 400 para outros
-/// DTOs deste projeto (ex.: <c>AdicionarTutorPetValidator</c>): `ModelState` inválido vira
-/// `400 ValidationProblemDetails` automaticamente, sem lançar exceção nenhuma — medido com
-/// teste HTTP real em <c>PetFotoHttpTests</c>, não presumido.</para>
+/// <para><b>Como isto vira 400.</b> Nenhuma exceção de <c>Kura.Domain.Exceptions</c> mapeia
+/// 400 no <c>ExceptionHandlerMiddleware</c> (só 404/422/409/401/500). 🔴 <b>Fix wave G2
+/// (g2-ft03.md, achado G2-c/G2-e):</b> este validator NÃO é mais invocado pela auto-validation
+/// automática do FluentValidation (que reage a parâmetro `[FromForm]`/ModelState) — o
+/// controller (<c>PetsController.UploadFoto</c>) lê o multipart ele mesmo
+/// (<c>Request.ReadFormAsync()</c>, necessário para o 413 chegar ao middleware) e chama
+/// <c>Validate(dto)</c> manualmente, convertendo os erros em <c>ValidationProblem</c> — mesmo
+/// formato de resposta (400 <c>ValidationProblemDetails</c>), mecanismo de invocação
+/// diferente. Medido com teste HTTP real em <c>PetFotoHttpTests</c>, não presumido.</para>
 ///
 /// <para>🔴 <b>MEDIDO: as regras têm de ser SÍNCRONAS (<c>Must</c>), não
 /// <c>MustAsync</c>.</b> Uma primeira versão usava <c>MustAsync</c> e TODO request devolvia

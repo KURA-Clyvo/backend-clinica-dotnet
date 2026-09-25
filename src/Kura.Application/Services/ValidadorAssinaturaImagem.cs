@@ -1,7 +1,5 @@
 namespace Kura.Application.Services;
 
-using Microsoft.AspNetCore.Http;
-
 /// <summary>
 /// Detecta o formato REAL de uma imagem pelos primeiros bytes do arquivo (magic bytes) —
 /// nunca por <c>Content-Type</c> ou extensão informados pelo cliente, que são declaração,
@@ -36,11 +34,21 @@ public static class ValidadorAssinaturaImagem
 
     /// <summary>
     /// Lê só o cabeçalho do arquivo (até 12 bytes) e devolve o formato detectado, ou
-    /// <see langword="null"/> se o arquivo é nulo, vazio, ou os bytes não batem nenhuma das
-    /// 3 assinaturas suportadas. <see cref="IFormFile.OpenReadStream"/> devolve, a cada
-    /// chamada, um stream posicionado no início do CONTEÚDO daquela parte (não é
-    /// cumulativo/stateful entre chamadas) — chamar de novo depois, para copiar o arquivo
-    /// inteiro, é seguro e começa do byte 0 de novo.
+    /// <see langword="null"/> se o stream é nulo, vazio, ou os bytes não batem nenhuma das
+    /// 3 assinaturas suportadas.
+    ///
+    /// <para>🔴 <b>Fix wave G2 (g2-ft03.md, achado G2-e):</b> deixou de receber
+    /// <c>IFormFile</c> (tipo do framework web ASP.NET) — recebe <see cref="Stream"/>
+    /// puro, para que <c>Kura.Application</c> não precise de um <c>FrameworkReference</c> do
+    /// framework web. Quem abre o <see cref="Stream"/> a partir de um <c>IFormFile</c> é o
+    /// chamador (<c>PetsController</c>, em Kura.Api).</para>
+    ///
+    /// <para><b>Sempre reposiciona o stream em 0 ao final</b> (tanto quando encontra quanto
+    /// quando não encontra o cabeçalho completo) — este método é chamado mais de uma vez sobre
+    /// o MESMO stream (uma vez na validação em <c>PetFotoUploadValidator</c>, outra vez em
+    /// <c>PetFotoService</c> como defesa em profundidade, e a leitura final do arquivo inteiro
+    /// para gravar no storage também parte do byte 0) — sem o reset, a 2ª chamada leria a
+    /// partir de onde a 1ª parou e quebraria a detecção.</para>
     ///
     /// <para><b>SÍNCRONO de propósito, medido:</b> o pipeline de auto-validation do
     /// FluentValidation (<c>AddFluentValidationAutoValidation()</c>) invoca os validadores de
@@ -48,19 +56,19 @@ public static class ValidadorAssinaturaImagem
     /// <c>ReadAsync</c> e todo request de foto devolvia <c>500</c> com
     /// <c>AsyncValidatorInvokedSynchronouslyException</c> ("Validator can't be used with
     /// ASP.NET automatic validation as it contains asynchronous rules"), medido com teste
-    /// HTTP real. O arquivo já está inteiro em memória/disco local (multipart de até 2 MB,
-    /// <see cref="IFormFile"/>) quando chega aqui — ler alguns bytes de um stream já
-    /// materializado não bloqueia thread de forma relevante nesta escala.</para>
+    /// HTTP real. O arquivo já está inteiro em memória/disco local (multipart de até 2 MB)
+    /// quando chega aqui — ler alguns bytes de um stream já materializado não bloqueia thread
+    /// de forma relevante nesta escala.</para>
     /// </summary>
-    public static Formato? Detectar(IFormFile? arquivo)
+    public static Formato? Detectar(Stream? stream)
     {
-        if (arquivo is null || arquivo.Length == 0)
+        if (stream is null || stream.Length == 0)
             return null;
 
-        var tamanhoCabecalho = (int)Math.Min(TamanhoCabecalhoNecessario, arquivo.Length);
+        var tamanhoCabecalho = (int)Math.Min(TamanhoCabecalhoNecessario, stream.Length);
         var cabecalho = new byte[tamanhoCabecalho];
 
-        using var stream = arquivo.OpenReadStream();
+        stream.Position = 0;
         var totalLido = 0;
         while (totalLido < tamanhoCabecalho)
         {
@@ -69,6 +77,7 @@ public static class ValidadorAssinaturaImagem
                 break; // EOF antes do esperado — não deveria acontecer com Length correto, mas não trava
             totalLido += lidos;
         }
+        stream.Position = 0; // deixa pronto para uma leitura completa subsequente (ex.: gravar no storage)
 
         return DetectarPorCabecalho(cabecalho.AsSpan(0, totalLido));
     }

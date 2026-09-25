@@ -1,12 +1,16 @@
 namespace Kura.Application.Tests;
 
-using Microsoft.AspNetCore.Http;
-
 /// <summary>
-/// Bytes de amostra e fábrica de <see cref="IFormFile"/> para os testes de upload de foto
-/// (FT-03, backlog <c>KURA_BACKLOG_FOTO_PET.md</c>). Cada assinatura tem só o mínimo de
-/// bytes necessário para <c>ValidadorAssinaturaImagem</c> reconhecer o formato — não são
-/// imagens de verdade (não decodificam), só o suficiente para os primeiros bytes baterem.
+/// Bytes de amostra para os testes de upload de foto (FT-03, backlog
+/// <c>KURA_BACKLOG_FOTO_PET.md</c>). Cada assinatura tem só o mínimo de bytes necessário para
+/// <c>ValidadorAssinaturaImagem</c> reconhecer o formato — não são imagens de verdade (não
+/// decodificam), só o suficiente para os primeiros bytes baterem.
+///
+/// <para>🔴 <b>Fix wave G2 (g2-ft03.md, achado G2-e):</b> deixou de fabricar
+/// <c>IFormFile</c> — <c>Kura.Application</c> (e o que ela expõe, incluindo
+/// <c>PetFotoUploadDto</c>/<c>IPetFotoService</c>/<c>ValidadorAssinaturaImagem</c>) passou a
+/// trabalhar só com <see cref="Stream"/> puro, sem depender de
+/// <c>Microsoft.AspNetCore.Http</c>. Os testes fabricam <see cref="Stream"/> diretamente.</para>
 /// </summary>
 internal static class FormFileFixtures
 {
@@ -24,14 +28,5 @@ internal static class FormFileFixtures
     // mentiroso no teste da mordida 2 (aceite FT-03).
     public static readonly byte[] BytesInvalidos = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07];
 
-    public static IFormFile CriarArquivo(byte[] conteudo, string nomeParte, string contentType, string nomeArquivo = "arquivo")
-    {
-        var stream = new MemoryStream(conteudo);
-        var arquivo = new FormFile(stream, 0, conteudo.Length, nomeParte, nomeArquivo)
-        {
-            Headers = new HeaderDictionary(),
-            ContentType = contentType,
-        };
-        return arquivo;
-    }
+    public static Stream CriarStream(byte[] conteudo) => new MemoryStream(conteudo);
 }
