@@ -111,6 +111,13 @@ public class ExceptionHandlerMiddleware
             RegraDeNegocioException => StatusCodes.Status422UnprocessableEntity,
             ConflitoConcorrenciaException => StatusCodes.Status409Conflict,
             UnauthorizedAccessException => StatusCodes.Status401Unauthorized,
+            // FT-03 (backlog KURA_BACKLOG_FOTO_PET.md): o Kestrel lança esta exceção quando
+            // o corpo da requisição excede o limite configurado por [RequestSizeLimit]
+            // (ex.: POST .../pets/{id}/foto), com `StatusCode` já preenchido pelo próprio
+            // framework (413 nesse caso). SEM este case, o switch caía no default (500) —
+            // ou seja, um 413 genuíno vindo do Kestrel virava 500 ao passar por este
+            // middleware, o oposto do que [RequestSizeLimit] existe para sinalizar.
+            Microsoft.AspNetCore.Http.BadHttpRequestException badRequestEx => badRequestEx.StatusCode,
             _ => StatusCodes.Status500InternalServerError
         };
 

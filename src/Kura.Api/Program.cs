@@ -44,6 +44,17 @@ builder.Host.UseSerilog((ctx, sp, cfg) => cfg
     .WriteTo.File("logs/kura-api-.log", rollingInterval: RollingInterval.Day));
 
 builder.Services.AddControllers();
+// 🔴 Fix wave 2 da FT-03 (re-G2, g2b-ft03.md, achados re-G2-1/re-G2-2): o factory GLOBAL que
+// existia aqui (interceptava ApiBehaviorOptions.InvalidModelStateResponseFactory casando por
+// SUBSTRING "Request body too large") foi REMOVIDO — a re-G2 mediu que esse casamento por
+// texto é disparável por INPUT DO CLIENTE em QUALQUER rota do projeto (o
+// ModelBindingMessageProvider padrão ecoa o valor tentado de qualquer parâmetro de query
+// inválido; um cliente que mandasse literalmente esse texto numa query string recebia 413 em
+// vez do 400 de validação normal). O 413 de verdade agora é local à rota
+// (Kura.Api.Filters.DesabilitaFormValueProvidersAttribute, aplicado só em
+// PetsController.UploadFoto) e detecta por TIPO/StatusCode via o case já existente de
+// BadHttpRequestException no ExceptionHandlerMiddleware — ver o XML doc do atributo e da
+// action para o mecanismo completo.
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddFluentValidationAutoValidation();
