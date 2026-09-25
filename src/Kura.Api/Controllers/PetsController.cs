@@ -216,8 +216,9 @@ public class PetsController : ControllerBase
     /// lança quando o corpo estoura <see cref="RequestSizeLimitAttribute"/> sobe CRU até o
     /// <c>ExceptionHandlerMiddleware</c>, que já tem um case POR TIPO para ele. O
     /// <c>Request.ReadFormAsync(ct)</c> desta action passa a ser a PRIMEIRA leitura do form
-    /// (não uma segunda, depois de um model binder já ter lido e falhado) — por isso funciona
-    /// para corpo dentro do limite e nunca é alcançado para corpo acima dele. Provado com
+    /// (não uma segunda, depois de um model binder já ter lido e falhado): para corpo acima do
+    /// limite a action É alcançada, e é este <c>ReadFormAsync</c> que lança a exceção de 413,
+    /// que sobe crua até o middleware (medido na G2c: sonda na entrada da action). Provado com
     /// <c>UseKestrel()</c> real: <c>Content-Length</c> e <c>chunked</c> acima do limite → 413
     /// <c>application/problem+json</c>; corpo válido menor que o limite → 200; spoof na query
     /// string de outra rota → 400 (não mais 413). Ver <c>PetFotoKestrelHttpTests</c> e o

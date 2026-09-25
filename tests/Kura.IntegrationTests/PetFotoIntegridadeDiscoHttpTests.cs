@@ -29,7 +29,10 @@ using Microsoft.Extensions.DependencyInjection;
 /// mock de <see cref="Kura.Domain.Interfaces.IArmazenamentoArquivos"/> nunca vê os bytes de
 /// verdade. Usa <see cref="ArmazenamentoLocalDisco"/> real, apontado (via
 /// <c>Storage:BasePath</c>) para uma pasta temporária isolada por teste, apagada no
-/// <see cref="IAsyncDisposable.DisposeAsync"/> da fábrica.</para>
+/// <c>finally</c> do próprio teste.</para>
+///
+/// <para><b>Conteúdos DIFERENTES em thumb e media</b> (achado g2c-2): com bytes iguais nas
+/// duas partes, gravar a thumb no lugar da media (e vice-versa) passaria despercebido.</para>
 /// </summary>
 [Trait(ConvencaoDeTestes.Categoria, ConvencaoDeTestes.Integracao)]
 public class PetFotoIntegridadeDiscoHttpTests
@@ -44,6 +47,14 @@ public class PetFotoIntegridadeDiscoHttpTests
         0xFF, 0xD8, 0xFF, 0xE0,
         0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
         0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+    ];
+
+    // Mesma assinatura JPEG, conteúdo diferente — é a parte "media" (variante _1080).
+    private static readonly byte[] JpegConhecidoMedia =
+    [
+        0xFF, 0xD8, 0xFF, 0xE0,
+        0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+        0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
     ];
 
     /// <summary>
@@ -90,7 +101,7 @@ public class PetFotoIntegridadeDiscoHttpTests
 
             var conteudo = new MultipartFormDataContent();
             conteudo.Add(new ByteArrayContent(JpegConhecido), "thumb", "t.jpg");
-            conteudo.Add(new ByteArrayContent(JpegConhecido), "media", "m.jpg");
+            conteudo.Add(new ByteArrayContent(JpegConhecidoMedia), "media", "m.jpg");
 
             var resposta = await client.PostAsync($"/api/v1/pets/{idPet}/foto", conteudo);
 
@@ -107,7 +118,10 @@ public class PetFotoIntegridadeDiscoHttpTests
             foreach (var caminho in arquivosGravados)
             {
                 var bytesGravados = await File.ReadAllBytesAsync(caminho);
-                bytesGravados.Should().Equal(JpegConhecido,
+                var esperado = Path.GetFileNameWithoutExtension(caminho).EndsWith("_256")
+                    ? JpegConhecido
+                    : JpegConhecidoMedia;
+                bytesGravados.Should().Equal(esperado,
                     $"'{Path.GetFileName(caminho)}' tem de ser BYTE A BYTE igual ao que foi " +
                     "enviado — um stream que perde os primeiros bytes na gravação (ex.: reset " +
                     "de Position ausente) produziria um arquivo mais curto, sem o cabeçalho " +
