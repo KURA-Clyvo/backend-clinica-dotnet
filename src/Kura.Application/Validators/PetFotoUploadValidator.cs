@@ -14,10 +14,16 @@ using Kura.Application.Services;
 /// (g2-ft03.md, achado G2-c/G2-e):</b> este validator NÃO é mais invocado pela auto-validation
 /// automática do FluentValidation (que reage a parâmetro `[FromForm]`/ModelState) — o
 /// controller (<c>PetsController.UploadFoto</c>) lê o multipart ele mesmo
-/// (<c>Request.ReadFormAsync()</c>, necessário para o 413 chegar ao middleware) e chama
-/// <c>Validate(dto)</c> manualmente, convertendo os erros em <c>ValidationProblem</c> — mesmo
-/// formato de resposta (400 <c>ValidationProblemDetails</c>), mecanismo de invocação
-/// diferente. Medido com teste HTTP real em <c>PetFotoHttpTests</c>, não presumido.</para>
+/// (<c>Request.ReadFormAsync()</c>) e chama <c>Validate(dto)</c> manualmente, convertendo os
+/// erros em <c>ValidationProblem</c> — mesmo formato de resposta (400
+/// <c>ValidationProblemDetails</c>), mecanismo de invocação diferente. Medido com teste HTTP
+/// real em <c>PetFotoHttpTests</c>, não presumido. 🔴 <b>Fix wave 2 (re-G2, g2b-ft03.md/M6):</b>
+/// a leitura manual do form NÃO é "necessária para o 413 chegar ao middleware" — quem faz o
+/// 413 chegar ao middleware é <c>Kura.Api.Filters.DesabilitaFormValueProvidersAttribute</c>
+/// (remove os <c>IValueProviderFactory</c> de form do model binding só nesta action), não a
+/// ordem/local de onde o form é lido. A leitura manual existe só porque
+/// <c>PetFotoUploadDto</c> não tem mais <c>[FromForm]</c>/<c>IFormFile</c> (achado G2-e) — são
+/// dois fixes independentes, e o comentário anterior misturava os dois.</para>
 ///
 /// <para>🔴 <b>MEDIDO: as regras têm de ser SÍNCRONAS (<c>Must</c>), não
 /// <c>MustAsync</c>.</b> Uma primeira versão usava <c>MustAsync</c> e TODO request devolvia

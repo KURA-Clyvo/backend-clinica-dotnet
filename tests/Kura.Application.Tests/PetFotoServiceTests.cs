@@ -175,6 +175,41 @@ public class PetFotoServiceTests
     }
 
     /// <summary>
+    /// 🔴 Fix wave 2 (re-G2, g2b-ft03.md, achado re-G2-4) — MORDIDA: <c>ChaveFotoPet.Variante</c>
+    /// (achado G2-f, fix wave 1) passou a lançar <see cref="ArgumentException"/> quando a chave
+    /// base não tem extensão. As 2 chamadas de <c>Variante</c> dentro de
+    /// <c>ExcluirVariantesAntigasAsync</c> estavam FORA do <c>try/catch</c> que existe para
+    /// "falha ao excluir arquivo antigo nunca falha o request" — uma <c>DS_FOTO_CHAVE</c>
+    /// antiga sem extensão (chave gravada por fora deste service, mesmo cenário que motivou o
+    /// G2-f) fazia a exceção escapar DEPOIS do <see cref="IUnitOfWork.CommitAsync"/>: 500 para
+    /// o cliente numa troca que JÁ FOI GRAVADA com sucesso. A troca em si (commit + linha nova)
+    /// tem de ser bem-sucedida mesmo quando a limpeza da foto antiga não pode nem calcular a
+    /// chave a excluir.
+    /// </summary>
+    [Fact]
+    public async Task UploadFotoAsync_ChaveAntigaSemExtensao_NaoLancaEGravaNova()
+    {
+        const string chaveAntigaMalformada = "chave-legada-sem-extensao";
+        SetupPet(1L, dsFotoChave: chaveAntigaMalformada);
+        _uowMock.Setup(u => u.CommitAsync()).ReturnsAsync(1);
+
+        var thumb = FormFileFixtures.CriarStream(FormFileFixtures.WebpValido);
+        var media = FormFileFixtures.CriarStream(FormFileFixtures.WebpValido);
+
+        var act = async () => await _sut.UploadFotoAsync(1L, thumb, media, CancellationToken.None);
+
+        await act.Should().NotThrowAsync(
+            "chave antiga malformada não pode derrubar uma troca que já foi commitada com " +
+            "sucesso — a falha ao limpar o arquivo antigo é só um aviso de log (ver o " +
+            "try/catch de ExcluirVariantesAntigasAsync)");
+        _uowMock.Verify(u => u.CommitAsync(), Times.Once);
+        _armazenamentoMock.Verify(a => a.ExcluirAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+            "a chave antiga não tem extensão — ChaveFotoPet.Variante() lança antes de montar " +
+            "a chave a excluir, então ExcluirAsync nem chega a ser chamado; o que importa é " +
+            "que a exceção não escape do service");
+    }
+
+    /// <summary>
     /// Se o SEGUNDO arquivo (media) falha ao salvar, o PRIMEIRO (thumb) já salvo é excluído
     /// antes de propagar a exceção — nunca deixar órfão de escrita parcial.
     /// </summary>

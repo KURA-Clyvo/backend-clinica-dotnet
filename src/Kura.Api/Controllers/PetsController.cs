@@ -1,6 +1,7 @@
 namespace Kura.Api.Controllers;
 
 using FluentValidation;
+using Kura.Api.Filters;
 using Kura.Application.DTOs.EventoClinico;
 using Kura.Application.DTOs.Pet;
 using Kura.Application.DTOs.Vacina;
@@ -203,29 +204,28 @@ public class PetsController : ControllerBase
     /// depender de <c>Microsoft.AspNetCore.*</c>. A validação (magic bytes, presença,
     /// tamanho) roda manualmente aqui via <see cref="_validadorFoto"/>.</para>
     ///
-    /// <para>🔴 <b>Fix wave G2 (g2-ft03.md, achado G2-c) — ONDE o 413 de verdade é
-    /// produzido, e NÃO é aqui.</b> MEDIDO com diagnóstico (não deduzido): tirar
-    /// <c>[FromForm]</c> desta assinatura NÃO evita o <c>FormValueProviderFactory</c> do MVC
-    /// — ele chama <c>Request.ReadFormAsync()</c> para QUALQUER requisição
-    /// <c>multipart/form-data</c> que chega a UM controller action, incondicionalmente
-    /// (só olha <c>HttpRequest.HasFormContentType</c>, nunca os parâmetros da action), ANTES
-    /// da action ser invocada. Confirmado com um log na primeira linha deste método: ele
-    /// NUNCA é escrito quando o corpo excede o limite — a requisição morre antes de chegar
-    /// aqui. O fix real está em <c>Program.cs</c>
-    /// (<c>ApiBehaviorOptions.InvalidModelStateResponseFactory</c>): quando o Kestrel recusa
-    /// o corpo por <see cref="RequestSizeLimitAttribute"/>, o
-    /// <see cref="Microsoft.AspNetCore.Http.BadHttpRequestException"/>(413) (herda de
-    /// <see cref="IOException"/>) é capturado pelo <c>FormValueProviderFactory</c> e
-    /// embrulhado em <c>ValueProviderException</c>, que vira erro de ModelState — SÓ A
-    /// MENSAGEM sobrevive (<c>ModelError.Exception</c> é <see langword="null"/>, medido). O
-    /// factory customizado reconhece o texto ("Request body too large", produzido só pelo
-    /// Kestrel nesse cenário) e devolve 413 de verdade em vez do 400 automático. Provado com
-    /// <c>UseKestrel()</c> real: corpo maior que o limite → 413; corpo válido menor que o
-    /// limite → 200 (mesmo instrumento, controle positivo). Ver
-    /// <c>PetFotoKestrelHttpTests</c> e o relatório da task.</para>
+    /// <para>🔴 <b>Fix wave 2 (re-G2, g2b-ft03.md, achados re-G2-1/re-G2-2) — ONDE o 413 de
+    /// verdade é produzido.</b> A fix wave 1 detectava o 413 por SUBSTRING numa mensagem de
+    /// ModelState (<c>"Request body too large"</c>), num factory GLOBAL em <c>Program.cs</c> —
+    /// a re-G2 mediu que isso é disparável por INPUT DO CLIENTE em qualquer rota do projeto
+    /// (<c>GET /api/v1/agenda?dataInicio=Request%20body%20too%20large&amp;...</c> devolvia 413
+    /// antes desta fix, quando devia devolver 400). Fix: <see cref="Kura.Api.Filters.DesabilitaFormValueProvidersAttribute"/>
+    /// remove os <c>IValueProviderFactory</c> de FORM só para ESTA action, então nada chama
+    /// <c>Request.ReadFormAsync()</c> durante o model binding — o
+    /// <see cref="Microsoft.AspNetCore.Http.BadHttpRequestException"/>(413) que o Kestrel
+    /// lança quando o corpo estoura <see cref="RequestSizeLimitAttribute"/> sobe CRU até o
+    /// <c>ExceptionHandlerMiddleware</c>, que já tem um case POR TIPO para ele. O
+    /// <c>Request.ReadFormAsync(ct)</c> desta action passa a ser a PRIMEIRA leitura do form
+    /// (não uma segunda, depois de um model binder já ter lido e falhado) — por isso funciona
+    /// para corpo dentro do limite e nunca é alcançado para corpo acima dele. Provado com
+    /// <c>UseKestrel()</c> real: <c>Content-Length</c> e <c>chunked</c> acima do limite → 413
+    /// <c>application/problem+json</c>; corpo válido menor que o limite → 200; spoof na query
+    /// string de outra rota → 400 (não mais 413). Ver <c>PetFotoKestrelHttpTests</c> e o
+    /// relatório da task.</para>
     /// </remarks>
     [HttpPost("{id:long}/foto")]
     [RequestSizeLimit(2 * 1024 * 1024)]
+    [DesabilitaFormValueProviders]
     [Consumes("multipart/form-data")]
     [ProducesResponseType(typeof(PetFotoResponseDto), 200)]
     [ProducesResponseType(400)]

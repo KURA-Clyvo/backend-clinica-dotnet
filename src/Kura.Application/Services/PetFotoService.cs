@@ -54,12 +54,13 @@ public sealed class PetFotoService : IPetFotoService
         var pet = await _petRepository.GetByIdAsync(idPet)
             ?? throw new EntidadeNaoEncontradaException("Pet", idPet);
 
-        // Defesa em profundidade: o validator (PetFotoUploadValidator, roda antes via
-        // FluentValidation auto-validation) já garante que thumb/media são JPEG/PNG/WebP
-        // válidos por magic bytes E do MESMO formato (ruling F7-a — ver o validator, que
-        // devolve 400 para os dois casos). Detectar de novo aqui é barato (só lê o
-        // cabeçalho) e este service não deveria confiar cegamente em nunca ser chamado fora
-        // do pipeline HTTP validado (ex.: um teste unitário direto, como os desta própria
+        // Defesa em profundidade: o validator (PetFotoUploadValidator, invocado MANUALMENTE
+        // pelo PetsController.UploadFoto — fix wave G2/achado G2-e, deixou de ser
+        // auto-validation automática do FluentValidation) já garante que thumb/media são
+        // JPEG/PNG/WebP válidos por magic bytes E do MESMO formato (ruling F7-a — ver o
+        // validator, que devolve 400 para os dois casos). Detectar de novo aqui é barato (só
+        // lê o cabeçalho) e este service não deveria confiar cegamente em nunca ser chamado
+        // fora do pipeline HTTP validado (ex.: um teste unitário direto, como os desta própria
         // task) — por isso o "mesmo formato" ainda é conferido aqui, como rede de segurança
         // (422, não 400: este caminho só é alcançável contornando o validator).
         var formatoThumb = ValidadorAssinaturaImagem.Detectar(thumb)
@@ -119,15 +120,24 @@ public sealed class PetFotoService : IPetFotoService
 
     private async Task ExcluirVariantesAntigasAsync(string chaveBaseAntiga, CancellationToken ct)
     {
-        var chaveThumbAntiga = ChaveFotoPet.Variante(chaveBaseAntiga, ChaveFotoPet.SufixoThumb);
-        var chaveMediaAntiga = ChaveFotoPet.Variante(chaveBaseAntiga, ChaveFotoPet.SufixoMedia);
-
         // Falha ao excluir arquivo antigo é aviso, nunca falha do request (regra do
         // backlog) — a foto nova já está commitada; um órfão no disco é dívida de storage.
         // Log sem PII: só chave (ids numéricos de clínica/pet + uuid), nunca dado de
         // paciente/tutor.
+        //
+        // 🔴 Fix wave 2 (re-G2, g2b-ft03.md, achado re-G2-4): ChaveFotoPet.Variante() (achado
+        // G2-f, fix wave 1) passou a LANÇAR ArgumentException quando a chave base não tem
+        // extensão — e as 2 chamadas abaixo estavam FORA deste try/catch. Uma
+        // DS_FOTO_CHAVE antiga malformada (ex.: gravada por fora deste service, cenário que
+        // motivou o G2-f) fazia a exceção escapar DEPOIS do CommitAsync já ter sido feito —
+        // 500 para o cliente numa troca que já foi gravada com sucesso. Movidas para dentro
+        // do try: agora uma chave antiga malformada vira só o mesmo aviso de log, igual a
+        // qualquer outra falha ao limpar o arquivo antigo.
         try
         {
+            var chaveThumbAntiga = ChaveFotoPet.Variante(chaveBaseAntiga, ChaveFotoPet.SufixoThumb);
+            var chaveMediaAntiga = ChaveFotoPet.Variante(chaveBaseAntiga, ChaveFotoPet.SufixoMedia);
+
             await _armazenamento.ExcluirAsync(chaveThumbAntiga, ct);
             await _armazenamento.ExcluirAsync(chaveMediaAntiga, ct);
         }
