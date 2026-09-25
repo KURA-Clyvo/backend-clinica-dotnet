@@ -18,6 +18,7 @@ public class PetServiceTests
     private readonly Mock<IUnitOfWork> _uowMock = new();
     private readonly Mock<IClinicaContext> _clinicaMock = new();
     private readonly Mock<ITutorRepository> _tutorRepoMock = new();
+    private readonly Mock<IGeradorUrlFotoPet> _geradorUrlFotoPetMock = new();
     private readonly PetService _sut;
 
     public PetServiceTests()
@@ -26,7 +27,8 @@ public class PetServiceTests
         _sut = new PetService(
             _petRepoMock.Object, _tutorPetRepoMock.Object,
             _especieRepoMock.Object, _racaRepoMock.Object,
-            _uowMock.Object, _clinicaMock.Object, _tutorRepoMock.Object);
+            _uowMock.Object, _clinicaMock.Object, _tutorRepoMock.Object,
+            _geradorUrlFotoPetMock.Object);
     }
 
     private PetCreateDto ValidCreateDto(string? dsVinculo = null) => new()

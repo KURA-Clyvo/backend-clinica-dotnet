@@ -15,6 +15,15 @@ public sealed class PetResponseDto
     public char SgSexo { get; init; }
     public char SgPorte { get; init; }
     public bool StAtiva { get; init; }
+
+    // FT-04 (backlog KURA_BACKLOG_FOTO_PET.md, regra A5): URL assinada da variante 1080
+    // (detalhe) e da variante 256 (lista/avatar). null quando o pet não tem foto
+    // (Pet.DsFotoChave null) — nunca lança, nunca string vazia. Serializam camelCase
+    // (dsFotoUrl/dsFotoThumbUrl) pela convenção JSON padrão da API, mesmo nome que os 2 apps
+    // mobile já declaram em src/types/api.ts (dado sem produtor até esta task).
+    public string? DsFotoUrl { get; init; }
+    public string? DsFotoThumbUrl { get; init; }
+
     public IReadOnlyList<TutorVinculoDto> Tutores { get; init; } = [];
 }
 

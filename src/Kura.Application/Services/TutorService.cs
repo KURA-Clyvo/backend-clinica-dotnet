@@ -7,6 +7,7 @@ using Kura.Application.Services.Interfaces;
 using Kura.Domain.Entities;
 using Kura.Domain.Exceptions;
 using Kura.Domain.Interfaces;
+using Kura.Domain.Storage;
 
 public sealed class TutorService : ITutorService
 {
@@ -17,6 +18,7 @@ public sealed class TutorService : ITutorService
     private readonly IInviteTutorRepository _inviteRepository;
     private readonly IUnitOfWork _uow;
     private readonly IClinicaContext _clinicaContext;
+    private readonly IGeradorUrlFotoPet _geradorUrlFotoPet;
 
     public TutorService(
         ITutorRepository repository,
@@ -25,7 +27,8 @@ public sealed class TutorService : ITutorService
         IRepository<Raca> racaRepository,
         IInviteTutorRepository inviteRepository,
         IUnitOfWork uow,
-        IClinicaContext clinicaContext)
+        IClinicaContext clinicaContext,
+        IGeradorUrlFotoPet geradorUrlFotoPet)
     {
         _repository = repository;
         _tutorPetRepository = tutorPetRepository;
@@ -34,6 +37,7 @@ public sealed class TutorService : ITutorService
         _inviteRepository = inviteRepository;
         _uow = uow;
         _clinicaContext = clinicaContext;
+        _geradorUrlFotoPet = geradorUrlFotoPet;
     }
 
     public async Task<IEnumerable<TutorResponseDto>> SearchAsync(string? busca)
@@ -75,7 +79,12 @@ public sealed class TutorService : ITutorService
                 DtNascimento = pet.DtNascimento,
                 SgSexo = pet.SgSexo,
                 SgPorte = pet.SgPorte,
-                StAtiva = pet.StAtiva
+                StAtiva = pet.StAtiva,
+                // FT-04 (backlog KURA_BACKLOG_FOTO_PET.md): esta lista usa o MESMO
+                // PetResponseDto de PetService.BuildResponseAsync — medido, é o único outro
+                // construtor de PetResponseDto no projeto (GET /api/v1/tutores/{id}/pets).
+                DsFotoUrl = _geradorUrlFotoPet.GerarUrl(pet.DsFotoChave, ChaveFotoPet.SufixoMedia),
+                DsFotoThumbUrl = _geradorUrlFotoPet.GerarUrl(pet.DsFotoChave, ChaveFotoPet.SufixoThumb),
             });
         }
         return result;
