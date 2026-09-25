@@ -131,7 +131,8 @@ public class LgpdNaoVazamentoTests
             Mock.Of<IRepository<Raca>>(),
             Mock.Of<IInviteTutorRepository>(),
             Mock.Of<IUnitOfWork>(),
-            Mock.Of<IClinicaContext>());
+            Mock.Of<IClinicaContext>(),
+            Mock.Of<IGeradorUrlFotoPet>());
 
         // Act
         // "Não encontrado" é modelado como null, nunca como exceção — a forma mais

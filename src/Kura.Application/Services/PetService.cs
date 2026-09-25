@@ -5,6 +5,7 @@ using Kura.Application.Services.Interfaces;
 using Kura.Domain.Entities;
 using Kura.Domain.Exceptions;
 using Kura.Domain.Interfaces;
+using Kura.Domain.Storage;
 
 public sealed class PetService : IPetService
 {
@@ -15,6 +16,7 @@ public sealed class PetService : IPetService
     private readonly IUnitOfWork _uow;
     private readonly IClinicaContext _clinicaContext;
     private readonly ITutorRepository _tutorRepository;
+    private readonly IGeradorUrlFotoPet _geradorUrlFotoPet;
 
     public PetService(
         IPetRepository repository,
@@ -23,7 +25,8 @@ public sealed class PetService : IPetService
         IRepository<Raca> racaRepository,
         IUnitOfWork uow,
         IClinicaContext clinicaContext,
-        ITutorRepository tutorRepository)
+        ITutorRepository tutorRepository,
+        IGeradorUrlFotoPet geradorUrlFotoPet)
     {
         _repository = repository;
         _tutorPetRepository = tutorPetRepository;
@@ -32,6 +35,7 @@ public sealed class PetService : IPetService
         _uow = uow;
         _clinicaContext = clinicaContext;
         _tutorRepository = tutorRepository;
+        _geradorUrlFotoPet = geradorUrlFotoPet;
     }
 
     public async Task<IEnumerable<PetResponseDto>> GetByFiltersAsync(long? tutorId, long? especieId, char? porte)
@@ -152,6 +156,10 @@ public sealed class PetService : IPetService
             SgSexo = pet.SgSexo,
             SgPorte = pet.SgPorte,
             StAtiva = pet.StAtiva,
+            // FT-04 (backlog KURA_BACKLOG_FOTO_PET.md, regra A5): null quando o pet não tem
+            // foto (IGeradorUrlFotoPet.GerarUrl já devolve null para chaveBase null/vazia).
+            DsFotoUrl = _geradorUrlFotoPet.GerarUrl(pet.DsFotoChave, ChaveFotoPet.SufixoMedia),
+            DsFotoThumbUrl = _geradorUrlFotoPet.GerarUrl(pet.DsFotoChave, ChaveFotoPet.SufixoThumb),
             Tutores = vinculos.Select(tp => new TutorVinculoDto
             {
                 IdTutor = tp.IdTutor,

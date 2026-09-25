@@ -121,6 +121,17 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IArmazenamentoArquivos, ArmazenamentoLocalDisco>();
         services.AddScoped<IAssinadorUrlFoto>(_ => new AssinadorUrlFotoHmac(fotoUrlSecret));
 
+        // FT-04 (backlog KURA_BACKLOG_FOTO_PET.md): monta a URL assinada completa (base +
+        // chave da variante + exp + sig) a partir da chave BASE gravada no Pet — ver
+        // GeradorUrlFotoPet para o porquê de a implementação morar em Kura.Api (precisa de
+        // IHttpContextAccessor para a base derivada do request atual). TimeProvider.System
+        // como singleton: relógio real em produção, substituível por um fake em teste
+        // (WithWebHostBuilder) sem Thread.Sleep. SEM fail-fast novo para Foto:UrlBase/
+        // Foto:ValidadeUrlHoras de propósito (brief FT-04): ausência é o caminho NORMAL
+        // (deriva do request, default 24h), diferente de Foto:UrlSecret acima.
+        services.AddSingleton(TimeProvider.System);
+        services.AddScoped<IGeradorUrlFotoPet, GeradorUrlFotoPet>();
+
         services.AddHttpClient<IDailyService, DailyService>((sp, http) =>
         {
             var apiKey = configuration["Daily:ApiKey"]

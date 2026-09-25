@@ -38,7 +38,8 @@ public class MultiTenantTests
             .Returns(Task.CompletedTask);
 
         var sut = new PetService(repoMock.Object, tutorPetMock.Object,
-            especieMock.Object, racaMock.Object, uowMock.Object, ctxMock.Object, tutorRepoMock.Object);
+            especieMock.Object, racaMock.Object, uowMock.Object, ctxMock.Object, tutorRepoMock.Object,
+            Mock.Of<IGeradorUrlFotoPet>());
 
         // Act
         await sut.CreateAsync(new PetCreateDto

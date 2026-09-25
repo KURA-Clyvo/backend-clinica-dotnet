@@ -17,6 +17,7 @@ public class TutorServiceTests
     private readonly Mock<IInviteTutorRepository> _inviteRepoMock = new();
     private readonly Mock<IUnitOfWork> _uowMock = new();
     private readonly Mock<IClinicaContext> _clinicaContextMock = new();
+    private readonly Mock<IGeradorUrlFotoPet> _geradorUrlFotoPetMock = new();
     private readonly TutorService _sut;
 
     public TutorServiceTests()
@@ -33,7 +34,8 @@ public class TutorServiceTests
             _racaRepoMock.Object,
             _inviteRepoMock.Object,
             _uowMock.Object,
-            _clinicaContextMock.Object);
+            _clinicaContextMock.Object,
+            _geradorUrlFotoPetMock.Object);
     }
 
     private static TutorCreateDto ValidDto(string canal = "WHATSAPP", string nrTelefone = "11999999999") => new()

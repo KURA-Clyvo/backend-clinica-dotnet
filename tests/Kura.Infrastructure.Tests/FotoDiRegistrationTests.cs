@@ -72,4 +72,26 @@ public sealed class FotoDiRegistrationTests
         services.Should().Contain(d => d.ServiceType == typeof(IArmazenamentoArquivos));
         services.Should().Contain(d => d.ServiceType == typeof(IAssinadorUrlFoto));
     }
+
+    /// <summary>
+    /// FT-04 (backlog <c>KURA_BACKLOG_FOTO_PET.md</c>): <c>IGeradorUrlFotoPet</c> e o
+    /// <c>TimeProvider</c> singleton que ele consome também são registrados — SEM exigir
+    /// <c>Foto:UrlBase</c> nem <c>Foto:ValidadeUrlHoras</c> na config (nenhum fail-fast novo
+    /// para essas duas chaves, decisão do maestro): a única chave obrigatória continua sendo
+    /// <c>Foto:UrlSecret</c>, herdada da FT-02.
+    /// </summary>
+    [Fact]
+    public void AddInfrastructure_SemFotoUrlBaseNemValidadeUrlHoras_RegistraIGeradorUrlFotoPetETimeProvider()
+    {
+        var configuration = ConfigComChaves(new Dictionary<string, string?>
+        {
+            ["Foto:UrlSecret"] = "chave-de-teste-com-mais-de-32-bytes-ok",
+        });
+        var services = new ServiceCollection();
+
+        services.AddInfrastructure(configuration);
+
+        services.Should().Contain(d => d.ServiceType == typeof(IGeradorUrlFotoPet));
+        services.Should().Contain(d => d.ServiceType == typeof(TimeProvider));
+    }
 }
