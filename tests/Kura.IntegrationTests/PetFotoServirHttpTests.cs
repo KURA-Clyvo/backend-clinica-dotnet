@@ -195,7 +195,7 @@ public class PetFotoServirHttpTests
             ambiente.Client, ambiente.IdPet, Imagem("jpg", 0x01), Imagem("jpg", 0x11));
         var pet = await ObterPetAsync(ambiente.Client, ambiente.IdPet);
 
-        var urlAdulterada = TrocarQuery(pet.DsFotoThumbUrl!, sig: TrocarUltimoChar(ExtrairQuery(pet.DsFotoThumbUrl!)["sig"]));
+        var urlAdulterada = TrocarQuery(pet.DsFotoThumbUrl!, sig: TrocarPrimeiroChar(ExtrairQuery(pet.DsFotoThumbUrl!)["sig"]));
 
         var resposta = await ambiente.Client.GetAsync(urlAdulterada);
         resposta.StatusCode.Should().Be(HttpStatusCode.Forbidden);
@@ -334,11 +334,20 @@ public class PetFotoServirHttpTests
             .Select(par => par.Split('=', 2))
             .ToDictionary(kv => kv[0], kv => Uri.UnescapeDataString(kv[1]));
 
-    private static string TrocarUltimoChar(string valor)
+    /// <summary>
+    /// Troca o PRIMEIRO caractere da <c>sig</c> — de propósito, não o último. Medido nesta
+    /// task (achado F3-a do G2, <c>g2-ft01-ft02.md</c>, confirmado aqui): o último caractere
+    /// de uma sig base64url de 32 bytes carrega só 4 bits significativos (256 bits / 6 =
+    /// 42,67 ⇒ 43º char tem 2 bits "não usados" na decodificação) — trocar SÓ o último char
+    /// entre 'A' e 'B' (0x00/0x01, mesmos 4 bits altos) produz os MESMOS bytes decodificados
+    /// e a "adulteração" validaria como se nada tivesse mudado. O primeiro caractere cobre um
+    /// grupo de 6 bits inteiramente significativo — trocá-lo garante bytes diferentes.
+    /// </summary>
+    private static string TrocarPrimeiroChar(string valor)
     {
-        var ultimo = valor[^1];
-        var trocado = ultimo == 'A' ? 'B' : 'A';
-        return valor[..^1] + trocado;
+        var primeiro = valor[0];
+        var trocado = primeiro == 'A' ? 'B' : 'A';
+        return trocado + valor[1..];
     }
 
     private static string TrocarQuery(string url, string? exp = null, string? sig = null)
