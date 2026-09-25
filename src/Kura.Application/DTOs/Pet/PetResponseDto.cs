@@ -19,8 +19,8 @@ public sealed class PetResponseDto
     // FT-04 (backlog KURA_BACKLOG_FOTO_PET.md, regra A5): URL assinada da variante 1080
     // (detalhe) e da variante 256 (lista/avatar). null quando o pet não tem foto
     // (Pet.DsFotoChave null) — nunca lança, nunca string vazia. Serializam camelCase
-    // (dsFotoUrl/dsFotoThumbUrl) pela convenção JSON padrão da API, mesmo nome que os 2 apps
-    // mobile já declaram em src/types/api.ts (dado sem produtor até esta task).
+    // (dsFotoUrl/dsFotoThumbUrl) pela convenção JSON padrão da API. Os apps ainda NÃO
+    // declaram esses campos no tipo de pet — o consumo entra na FT-08 (medido no G2 da FT-04).
     public string? DsFotoUrl { get; init; }
     public string? DsFotoThumbUrl { get; init; }
 
