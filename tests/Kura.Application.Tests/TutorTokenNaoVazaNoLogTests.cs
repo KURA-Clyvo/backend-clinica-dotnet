@@ -18,9 +18,9 @@ using Microsoft.Extensions.Primitives;
 /// Diferente de um mock que só verificaria "Log foi chamado" (que não prova nada sobre o TEXTO
 /// final), este teste usa um <see cref="ILoggerProvider"/> capturador real, plugado num
 /// <see cref="ILoggerFactory"/> de verdade — captura a mensagem FORMATADA de QUALQUER logger
-/// criado através dele (mesmo padrão de <c>ExceptionHandlerMiddlewareLgpdTests</c>, generalizado
-/// para múltiplas categorias porque aqui o grafo de chamada envolve mais de um tipo:
-/// <see cref="GeradorLinkConvite"/> loga um WARN na construção quando a config está ausente).
+/// criado através dele. <c>Convite:UrlBaseAppTutor</c> é CONFIGURADA de propósito (não ausente):
+/// só assim <see cref="GeradorLinkConvite.GerarLink"/> passa da checagem de base nula e executa
+/// o resto do método — é ali, não no construtor, que uma mutação futura poderia logar o token.
 ///
 /// Controle positivo (regra de ouro deste ecossistema — "0 não é prova de ausência sem provar
 /// que o instrumento veria 1"): loga um valor de propósito DEPOIS do exercício real e confirma
@@ -88,10 +88,15 @@ public class TutorTokenNaoVazaNoLogTests
         var provider = new CapturingLoggerProvider();
         using var loggerFactory = new LoggerFactory([provider]);
 
-        // Convite:UrlBaseAppTutor AUSENTE de propósito — este é o ramo que loga (o WARN da
-        // partida). Com a config presente, GeradorLinkConvite não loga nada nunca — o ramo
-        // ausente é o mais rigoroso dos dois para esta mordida.
-        var configuracao = new ConfiguracaoFake(new Dictionary<string, string?>());
+        // Convite:UrlBaseAppTutor CONFIGURADA de propósito: é só neste ramo que
+        // GerarLink() passa da checagem de base nula e executa o resto do método — o ramo
+        // ausente (WARN na partida, GerarLink devolve null antes de qualquer outra linha)
+        // não exercitaria uma mutação escrita DENTRO de GerarLink. Testado em separado
+        // (CreateAsync_GeradorLinkConviteDevolveNull_DsLinkConviteVaiNullNaResposta).
+        var configuracao = new ConfiguracaoFake(new Dictionary<string, string?>
+        {
+            ["Convite:UrlBaseAppTutor"] = "https://tutor.exemplo.com"
+        });
         var geradorLinkConvite = new GeradorLinkConvite(
             configuracao,
             loggerFactory.CreateLogger<GeradorLinkConvite>());
@@ -129,7 +134,7 @@ public class TutorTokenNaoVazaNoLogTests
         };
 
         // Act
-        await sut.CreateAsync(dto, 1L);
+        var resultado = await sut.CreateAsync(dto, 1L);
 
         inviteCapturado.Should().NotBeNull();
         var token = inviteCapturado!.NrToken.ToString();
@@ -145,8 +150,10 @@ public class TutorTokenNaoVazaNoLogTests
         // NrToken em GeradorLinkConvite.GerarLink) faria este bloco falhar.
         provider.MensagensFormatadas.Should().NotContain(m => m.Contains(token));
 
-        // Confere que o WARN de config ausente de fato disparou (senão o teste não estaria
-        // exercitando o ramo que loga) — sem mencionar o token, como esperado.
-        provider.MensagensFormatadas.Should().Contain(m => m.Contains("Convite:UrlBaseAppTutor"));
+        // Confere que GerarLink() de fato executou até o fim do método (base configurada,
+        // link não-nulo na resposta) — senão este teste não estaria exercitando o corpo de
+        // GerarLink, só o construtor, e a mordida (d) escrita ali passaria despercebida.
+        resultado.DsLinkConvite.Should().NotBeNull();
+        resultado.DsLinkConvite.Should().Contain(token);
     }
 }
