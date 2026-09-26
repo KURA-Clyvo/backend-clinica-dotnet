@@ -6,6 +6,7 @@ using System.Text;
 using FluentValidation.AspNetCore;
 using Microsoft.OpenApi;
 using Kura.Api.Extensions;
+using Kura.Domain.Interfaces;
 using Kura.Infrastructure.Persistence;
 
 // QuestPDF (geração de receituário, TASK-15): licença Community — gratuita para
@@ -120,6 +121,16 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 var app = builder.Build();
+
+// G2 fix wave (KURA_BACKLOG_RECEPCAO.md, REC-01, achado Minor #5): resolve o singleton AQUI,
+// logo depois do Build(), para o WARN de config ausente (Convite:UrlBaseAppTutor) sair de fato
+// NA PARTIDA — antes desta linha, o comentário em ServiceCollectionExtensions, o docstring de
+// GeradorLinkConvite e o relatório da REC-01 afirmavam "logado uma vez no construtor, na partida
+// do processo", mas o singleton só era instanciado na PRIMEIRA resolução em runtime (o 1º
+// POST /tutores) — medido pela G2 via sonda HTTP: 0 WARN depois de subir e responder /health,
+// 1 WARN só depois do 1º POST. Resolver aqui não tem efeito colateral (só lê IConfiguration e
+// loga) e não toca Oracle, então corre em qualquer ambiente, incluindo "Testing".
+_ = app.Services.GetRequiredService<IGeradorLinkConvite>();
 
 // Validação de migrations pendentes — apenas AVISO, não aplica nada: o schema é
 // responsabilidade do Flyway (MIGRATIONS_POLICY.md) e as migrations EF são só evidência.

@@ -38,5 +38,12 @@ public sealed class TutorUpdateValidator : AbstractValidator<TutorUpdateDto>
                     "já com DDI do Brasil (55 + DDD + número) ou telefone estrangeiro com '+' " +
                     "explícito.")
                 .When(x => !string.IsNullOrWhiteSpace(x.NrTelefone), ApplyConditionTo.CurrentValidator);
+
+        // G2 fix wave (achado Important #1): DsWhatsapp é opcional no PUT (ver TutorUpdateDto),
+        // mas quando informado precisa se encaixar na mesma regra de formato.
+        RuleFor(x => x.DsWhatsapp)
+            .Must(w => NormalizadorTelefone.TentarNormalizar(w, out _))
+                .WithMessage("'DsWhatsapp' inválido — mesma regra de 'NrTelefone'.")
+                .When(x => !string.IsNullOrWhiteSpace(x.DsWhatsapp), ApplyConditionTo.CurrentValidator);
     }
 }

@@ -68,4 +68,49 @@ public class TutorUpdateValidatorTests
 
         resultado.Errors.Should().NotContain(e => e.PropertyName == nameof(TutorUpdateDto.NrTelefone));
     }
+
+    // ── I1 (G2 fix wave, achado Important #1): DsWhatsapp opcional no PUT ───
+
+    [Fact]
+    public void Validate_DsWhatsappAusente_NaoRetornaErro()
+    {
+        var dto = new TutorUpdateDto
+        {
+            NmTutor = "Maria Silva", NrCpf = "12345678901", DsEmail = "maria@email.com",
+            NrTelefone = "11999999999", DsWhatsapp = null
+        };
+
+        var resultado = _sut.Validate(dto);
+
+        resultado.Errors.Should().NotContain(e => e.PropertyName == nameof(TutorUpdateDto.DsWhatsapp));
+    }
+
+    [Fact]
+    public void Validate_DsWhatsappFormatoInvalido_RetornaErro()
+    {
+        var dto = new TutorUpdateDto
+        {
+            NmTutor = "Maria Silva", NrCpf = "12345678901", DsEmail = "maria@email.com",
+            NrTelefone = "11999999999", DsWhatsapp = "123"
+        };
+
+        var resultado = _sut.Validate(dto);
+
+        resultado.IsValid.Should().BeFalse();
+        resultado.Errors.Should().Contain(e => e.PropertyName == nameof(TutorUpdateDto.DsWhatsapp));
+    }
+
+    [Fact]
+    public void Validate_DsWhatsappFormatoValido_NaoRetornaErro()
+    {
+        var dto = new TutorUpdateDto
+        {
+            NmTutor = "Maria Silva", NrCpf = "12345678901", DsEmail = "maria@email.com",
+            NrTelefone = "11999999999", DsWhatsapp = "+1 415 555 0100"
+        };
+
+        var resultado = _sut.Validate(dto);
+
+        resultado.Errors.Should().NotContain(e => e.PropertyName == nameof(TutorUpdateDto.DsWhatsapp));
+    }
 }

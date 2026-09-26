@@ -460,6 +460,142 @@ public class TutorServiceTests
         _uowMock.Verify(u => u.CommitAsync(), Times.Never);
     }
 
+    // ── I1 (G2 fix wave, achado Important #1 — LGPD): PUT e o DS_WHATSAPP ───
+
+    [Fact]
+    public async Task UpdateAsync_DsWhatsappVeioNoCorpo_NormalizaEGravaIndependenteDoTelefoneAntigo()
+    {
+        // Ramo 1: DsWhatsapp presente no corpo ⇒ sempre normaliza e grava o valor informado,
+        // não importa se era "mesmo número" ou diferente antes.
+        var tutorExistente = new Tutor
+        {
+            Id = 42L, NmTutor = "Maria", NrTelefone = "5511900000000", DsWhatsapp = "+5511900000000"
+        };
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(42L)).ReturnsAsync(tutorExistente);
+
+        var dto = new TutorUpdateDto
+        {
+            NmTutor = "Maria", NrCpf = "12345678901", DsEmail = "maria@email.com",
+            NrTelefone = "11955554444", DsWhatsapp = "11988889999"
+        };
+
+        await _sut.UpdateAsync(42L, dto);
+
+        tutorExistente.NrTelefone.Should().Be("5511955554444");
+        tutorExistente.DsWhatsapp.Should().Be("+5511988889999");
+    }
+
+    [Fact]
+    public async Task UpdateAsync_DsWhatsappAusente_EraMesmoNumeroDoTelefoneAntigo_AcompanhaOTelefoneNovo()
+    {
+        // Ramo 2: DS_WHATSAPP == '+' + DS_TELEFONE antigo ⇒ "mesmo número" ⇒ segue o telefone
+        // novo. É o achado M5/M6 da G2: sem este fix, o lembrete de vacina (VW_VACINAS_VENCENDO
+        // → Luna) ia para o número ANTIGO depois de a recepção corrigir o telefone.
+        var tutorExistente = new Tutor
+        {
+            Id = 42L, NmTutor = "Maria", NrTelefone = "5511900000000", DsWhatsapp = "+5511900000000"
+        };
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(42L)).ReturnsAsync(tutorExistente);
+
+        var dto = new TutorUpdateDto
+        {
+            NmTutor = "Maria", NrCpf = "12345678901", DsEmail = "maria@email.com",
+            NrTelefone = "21988887777" // DsWhatsapp ausente do corpo
+        };
+
+        await _sut.UpdateAsync(42L, dto);
+
+        tutorExistente.NrTelefone.Should().Be("5521988887777");
+        tutorExistente.DsWhatsapp.Should().Be("+5521988887777", "era o mesmo número do telefone antigo — acompanha");
+    }
+
+    [Fact]
+    public async Task UpdateAsync_DsWhatsappAusente_EraNuloAntes_ContaComoMesmoNumeroEAcompanha()
+    {
+        // Ramo 2 (variante): DS_WHATSAPP nulo é o estado de todo tutor criado ANTES da REC-01
+        // (G0 item 4 — nulo nos 18 tutores existentes) — precisa contar como "mesmo número",
+        // senão esses tutores antigos NUNCA ganham DsWhatsapp ao serem editados.
+        var tutorExistente = new Tutor
+        {
+            Id = 43L, NmTutor = "Tutor Antigo", NrTelefone = "1198880000", DsWhatsapp = null
+        };
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(43L)).ReturnsAsync(tutorExistente);
+
+        var dto = new TutorUpdateDto
+        {
+            NmTutor = "Tutor Antigo", NrCpf = "12345678901", DsEmail = "antigo@email.com",
+            NrTelefone = "11988887777"
+        };
+
+        await _sut.UpdateAsync(43L, dto);
+
+        tutorExistente.DsWhatsapp.Should().Be("+5511988887777");
+    }
+
+    [Fact]
+    public async Task UpdateAsync_DsWhatsappAusente_EraDiferenteDoTelefoneAntigo_Mantem()
+    {
+        // Ramo 3: DS_WHATSAPP diferente do telefone (era distinto de propósito) ⇒ mantém.
+        var tutorExistente = new Tutor
+        {
+            Id = 44L, NmTutor = "Maria", NrTelefone = "5511900000000", DsWhatsapp = "+5511777776666"
+        };
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(44L)).ReturnsAsync(tutorExistente);
+
+        var dto = new TutorUpdateDto
+        {
+            NmTutor = "Maria", NrCpf = "12345678901", DsEmail = "maria@email.com",
+            NrTelefone = "21988887777"
+        };
+
+        await _sut.UpdateAsync(44L, dto);
+
+        tutorExistente.NrTelefone.Should().Be("5521988887777");
+        tutorExistente.DsWhatsapp.Should().Be("+5511777776666", "era um WhatsApp intencionalmente diferente — não acompanha");
+    }
+
+    [Fact]
+    public async Task UpdateAsync_TelefoneNaoMudaEraMesmoNumero_DsWhatsappPermaneceLigadoAoAntigo()
+    {
+        // Guarda contra "+Não informado": se o telefone novo vier vazio (sentinela), o ramo 2
+        // não deve tentar acompanhar um valor não-normalizável.
+        var tutorExistente = new Tutor
+        {
+            Id = 45L, NmTutor = "Maria", NrTelefone = "5511900000000", DsWhatsapp = "+5511900000000"
+        };
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(45L)).ReturnsAsync(tutorExistente);
+
+        var dto = new TutorUpdateDto
+        {
+            NmTutor = "Maria", NrCpf = "12345678901", DsEmail = "maria@email.com",
+            NrTelefone = "" // sentinela
+        };
+
+        await _sut.UpdateAsync(45L, dto);
+
+        tutorExistente.NrTelefone.Should().Be("Não informado");
+        tutorExistente.DsWhatsapp.Should().Be("+5511900000000", "telefone não mudou de verdade (voltou a vazio) — DsWhatsapp não deve virar '+Não informado'");
+    }
+
+    [Fact]
+    public async Task UpdateAsync_DsWhatsappFormatoInvalido_LancaRegraDeNegocioENaoAtualiza()
+    {
+        var tutorExistente = new Tutor { Id = 46L, NmTutor = "Maria", NrTelefone = "5511900000000" };
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(46L)).ReturnsAsync(tutorExistente);
+
+        var dto = new TutorUpdateDto
+        {
+            NmTutor = "Maria", NrCpf = "12345678901", DsEmail = "maria@email.com",
+            NrTelefone = "11988887777", DsWhatsapp = "123"
+        };
+
+        var act = async () => await _sut.UpdateAsync(46L, dto);
+
+        await act.Should().ThrowAsync<RegraDeNegocioException>();
+        _tutorRepoMock.Verify(r => r.Update(It.IsAny<Tutor>()), Times.Never);
+        _uowMock.Verify(u => u.CommitAsync(), Times.Never);
+    }
+
     // ── BuscarContextoPorTelefoneAsync (TASK-67) ────────────────────────────
 
     [Fact]
@@ -533,13 +669,17 @@ public class TutorServiceTests
     }
 
     [Fact]
-    public async Task BuscarContextoPorTelefoneAsync_NumeroNacional_NormalizaAntesDeBuscarNoRepositorio()
+    public async Task BuscarContextoPorTelefoneAsync_NumeroNacional_TentaCruPrimeiroDepoisComPrefixo55()
     {
-        // Arrange — REC-01 (G0 item 4): normaliza a ENTRADA antes de buscar. A Luna sempre
-        // manda "55…" (Twilio), mas outro chamador (ou um teste manual) pode mandar nacional —
-        // os dois precisam achar o MESMO tutor. Mordida: sem esta normalização, o repositório
-        // é chamado com "11999990000" (nunca casa com o que está gravado, "5511999990000").
+        // I3 (G2 fix wave, achado Important #3): a busca tenta PRIMEIRO os dígitos EXATAMENTE
+        // como chegaram (é o que a Luna sempre manda — Twilio já entrega "55..." completo); só
+        // tenta com prefixo "55" se a primeira busca não achar E a entrada tiver 10/11 dígitos.
+        // A versão anterior normalizava a ENTRADA antes de buscar (achava direto o "55..."),
+        // mas isso quebrava o estrangeiro de 10/11 dígitos — ver o teste seguinte. Aqui travamos
+        // que o caso NACIONAL LEGADO continua achando, agora via as DUAS tentativas na ordem
+        // certa (cru primeiro, "55"+dígitos depois).
         var tutor = new Tutor { Id = 9, IdClinica = 42, NmTutor = "Nacional", NrTelefone = "5511999990000", StAtiva = true };
+        _tutorRepoMock.Setup(r => r.GetByTelefoneAsync("11999990000")).ReturnsAsync((Tutor?)null);
         _tutorRepoMock.Setup(r => r.GetByTelefoneAsync("5511999990000")).ReturnsAsync(tutor);
         _tutorPetRepoMock.Setup(r => r.GetByTutorIdAsync(tutor.Id)).ReturnsAsync(new List<TutorPet>());
 
@@ -548,8 +688,31 @@ public class TutorServiceTests
 
         // Assert
         result.Should().NotBeNull();
+        _tutorRepoMock.Verify(r => r.GetByTelefoneAsync("11999990000"), Times.Once);
         _tutorRepoMock.Verify(r => r.GetByTelefoneAsync("5511999990000"), Times.Once);
-        _tutorRepoMock.Verify(r => r.GetByTelefoneAsync("11999990000"), Times.Never);
+    }
+
+    [Fact]
+    public async Task BuscarContextoPorTelefoneAsync_EstrangeiroDeOnzeDigitos_AchaNaPrimeiraTentativaSemPrefixo55()
+    {
+        // I3 (G2 fix wave, achado Important #3 — o caso 6 do G0 estava marcado ✅ sem medir o
+        // efeito na busca): estrangeiro de 10/11 dígitos (EUA/Canadá) cadastrado com "+" (ramo 1
+        // de NormalizadorTelefone, armazenado SEM prefixo "55") precisa ser achado pela
+        // primeira tentativa (dígitos crus) — nunca pela tentativa com "55" prefixado, que
+        // corromperia um número que não é brasileiro. Mordida: se a ordem fosse invertida (ou
+        // só a tentativa com "55" existisse), este teste falha.
+        var tutor = new Tutor { Id = 10, IdClinica = 42, NmTutor = "Estrangeiro", NrTelefone = "14155550100", StAtiva = true };
+        _tutorRepoMock.Setup(r => r.GetByTelefoneAsync("14155550100")).ReturnsAsync(tutor);
+        _tutorPetRepoMock.Setup(r => r.GetByTutorIdAsync(tutor.Id)).ReturnsAsync(new List<TutorPet>());
+
+        // Act
+        var result = await _sut.BuscarContextoPorTelefoneAsync("14155550100");
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.IdTutor.Should().Be(10);
+        _tutorRepoMock.Verify(r => r.GetByTelefoneAsync("14155550100"), Times.Once);
+        _tutorRepoMock.Verify(r => r.GetByTelefoneAsync("5514155550100"), Times.Never);
     }
 
     [Fact]

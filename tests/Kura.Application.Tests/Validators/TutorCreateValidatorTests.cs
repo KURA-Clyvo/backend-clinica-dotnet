@@ -129,4 +129,32 @@ public class TutorCreateValidatorTests
         resultado.IsValid.Should().BeFalse();
         resultado.Errors.Should().Contain(e => e.PropertyName == nameof(TutorCreateDto.DsWhatsapp));
     }
+
+    // ── I2 (G2 fix wave, achado Important #2): piso/teto de dígitos ─────────
+
+    [Fact]
+    public void Validate_DsWhatsappComTrintaDigitos_RetornaErro()
+    {
+        // Achado Important #2 (G2, sonda M6/F2c): "+"+30 dígitos passava (201 no InMemory) —
+        // E.164 de 31 chars não cabe em DS_WHATSAPP VARCHAR2(20) (ORA-12899 no Oracle real).
+        var dto = ValidDto(dsWhatsapp: "+" + new string('9', 30));
+
+        var resultado = _sut.Validate(dto);
+
+        resultado.IsValid.Should().BeFalse();
+        resultado.Errors.Should().Contain(e => e.PropertyName == nameof(TutorCreateDto.DsWhatsapp));
+    }
+
+    [Theory]
+    [InlineData("+1")] // achado Minor #6
+    [InlineData("+55 11")]
+    public void Validate_NrTelefoneComDdiExplicitoAbaixoDoPiso_RetornaErro(string nrTelefoneCurto)
+    {
+        var dto = ValidDto(nrTelefone: nrTelefoneCurto);
+
+        var resultado = _sut.Validate(dto);
+
+        resultado.IsValid.Should().BeFalse();
+        resultado.Errors.Should().Contain(e => e.PropertyName == nameof(TutorCreateDto.NrTelefone));
+    }
 }

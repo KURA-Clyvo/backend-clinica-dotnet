@@ -160,6 +160,17 @@ public sealed class TutorService : ITutorService
         tutor.NrCpf = dto.NrCpf;
         tutor.DsEmail = dto.DsEmail;
 
+        // I1 (G2 fix wave, achado Important #1 — LGPD): capturado ANTES de mutar
+        // tutor.NrTelefone, porque a regra de "acompanhar o telefone novo" olha o estado
+        // ANTIGO. `tutor.NrTelefone` já é o valor ARMAZENADO (dígitos, ou o sentinela) — não
+        // precisa passar por TentarNormalizar de novo, e evita a armadilha de idempotência do
+        // ramo `+`/estrangeiro (ver NormalizadorTelefone). `DsWhatsapp == null` conta como
+        // "era o mesmo número" — é o estado de todo tutor criado ANTES da REC-01 (G0 item 4:
+        // nulo nos 18 tutores existentes), então editar o telefone desses tutores também
+        // atualiza o WhatsApp em vez de deixá-lo divergente para sempre.
+        var whatsappEraMesmoNumero = tutor.DsWhatsapp is null
+            || tutor.DsWhatsapp == NormalizadorTelefone.ParaE164(tutor.NrTelefone);
+
         // REC-01 (G0 item 4): o PUT NÃO exige telefone (recomendação do maestro — não quebrar
         // edição parcial de tutor antigo sem telefone); TASK-60 continua coalescendo para o
         // sentinela quando vazio. Quando o campo VEM preenchido, normaliza (idempotente) para o
@@ -178,6 +189,27 @@ public sealed class TutorService : ITutorService
         {
             throw new RegraDeNegocioException("Telefone inválido.");
         }
+
+        // I1: 3 ramos, na ordem do achado da G2 (M5/M6 — PUT trocava DS_TELEFONE e deixava
+        // DS_WHATSAPP com o número antigo; o lembrete de vacina ia para o número errado).
+        // 1) DsWhatsapp veio no corpo ⇒ normaliza e grava (a recepção está corrigindo os dois
+        //    campos explicitamente).
+        // 2) Não veio, e o WhatsApp ERA "o mesmo número" do telefone antigo ⇒ acompanha o
+        //    telefone NOVO (já normalizado acima) — só se o novo valor for normalizável (nunca
+        //    grava "+Não informado" quando o telefone volta a ficar vazio).
+        // 3) Não veio, e era DIFERENTE do telefone ⇒ mantém intocado (era intencionalmente um
+        //    número de WhatsApp distinto do telefone de contato).
+        if (!string.IsNullOrWhiteSpace(dto.DsWhatsapp))
+        {
+            if (!NormalizadorTelefone.TentarNormalizar(dto.DsWhatsapp, out var whatsappArmazenado))
+                throw new RegraDeNegocioException("WhatsApp inválido.");
+            tutor.DsWhatsapp = NormalizadorTelefone.ParaE164(whatsappArmazenado);
+        }
+        else if (whatsappEraMesmoNumero && NormalizadorTelefone.TentarNormalizar(tutor.NrTelefone, out _))
+        {
+            tutor.DsWhatsapp = NormalizadorTelefone.ParaE164(tutor.NrTelefone);
+        }
+        // senão: mantém tutor.DsWhatsapp como estava (ramo 3, ou telefone novo é o sentinela).
 
         _repository.Update(tutor);
         await _uow.CommitAsync();
@@ -203,16 +235,25 @@ public sealed class TutorService : ITutorService
         // da MESMA clínica" — o repositório já resolve a ambiguidade para null, ver
         // TutorRepository.
         //
-        // REC-01 (G0 item 4): normaliza a ENTRADA antes de buscar, para número nacional e
-        // "55…" acharem o mesmo tutor (a busca do repositório é igualdade EXATA sobre
-        // DS_TELEFONE, que agora é sempre gravado normalizado). Formato não reconhecido ⇒
-        // busca pelo valor cru mesmo (fallback inofensivo: não vai casar com nada gravado
-        // depois desta task, então devolve "não encontrado" como já fazia antes de existir
-        // normalização nenhuma — nunca lança 400/422 para quem só está consultando).
-        var chaveBusca = NormalizadorTelefone.TentarNormalizar(numero, out var normalizado)
-            ? normalizado
-            : numero;
+        // I3 (G2 fix wave, achado Important #3): a Luna SEMPRE manda os dígitos
+        // internacionais completos (twilio_inbound.py:32 só tira "whatsapp:"/"+", nunca
+        // reformata) — tenta PRIMEIRO com a entrada exatamente como chegou (só dígitos, sem
+        // reinterpretar DDI). Normalizar a entrada ANTES de buscar (versão anterior desta
+        // task) reescrevia um estrangeiro de 10/11 dígitos sem DDI Brasil (ex.: EUA/Canadá,
+        // "14155550100") para "5514155550100", que NUNCA casa com o valor gravado no cadastro
+        // (ramo `+` explícito grava "14155550100", sem prefixo — ver NormalizadorTelefone) —
+        // ou seja, o caso 6 do G0 nunca era encontrado pela Luna, ao contrário do que a tabela
+        // original alegava. Só tenta com o prefixo "55" se a primeira busca não achar E a
+        // entrada tiver 10/11 dígitos (formato nacional sem DDI — nunca é o que a Luna manda,
+        // mas cobre chamada manual/smoke com número legado). TASK-79 (2+ ativos ⇒ null)
+        // continua dentro de GetByTelefoneAsync, aplicada em CADA tentativa individualmente.
+        var digitosEntrada = NormalizadorTelefone.ExtrairApenasDigitos(numero);
+        var chaveBusca = digitosEntrada.Length == 0 ? numero : digitosEntrada;
         var tutor = await _repository.GetByTelefoneAsync(chaveBusca);
+        if (tutor is null && (digitosEntrada.Length == 10 || digitosEntrada.Length == 11))
+        {
+            tutor = await _repository.GetByTelefoneAsync("55" + digitosEntrada);
+        }
         if (tutor is null)
             return null;
 

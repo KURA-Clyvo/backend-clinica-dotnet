@@ -74,6 +74,72 @@ public class NormalizadorTelefoneTests
         armazenado.Should().BeEmpty();
     }
 
+    // ── G2 fix wave (achados Important #2 / Minor #6): piso/teto de dígitos ─
+
+    [Theory]
+    [InlineData("+1")] // 1 dígito — achado Minor #6, "nunca grava lixo" não cumpria
+    [InlineData("+55 11")] // 4 dígitos
+    [InlineData("+123456789")] // 9 dígitos — abaixo do piso (10)
+    public void ComDdiExplicito_MenosQueOPiso_DevolveFalse(string entrada)
+    {
+        var resultado = NormalizadorTelefone.TentarNormalizar(entrada, out var armazenado);
+
+        resultado.Should().BeFalse();
+        armazenado.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ComDdiExplicito_MaisQueOTeto_DevolveFalse()
+    {
+        // Achado Important #2 (G2): sonda mediu "+" + 30 dígitos aceito, E.164 de 31 chars —
+        // NÃO cabe em DS_WHATSAPP VARCHAR2(20) (backend-tutor-java V1__initial_schema.sql:92).
+        var entrada = "+" + new string('9', 30);
+
+        var resultado = NormalizadorTelefone.TentarNormalizar(entrada, out var armazenado);
+
+        resultado.Should().BeFalse();
+        armazenado.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ComDdiExplicito_ExatamenteNoTeto_NormalizaEExatosDezesseisCharsEmE164()
+    {
+        // Teto = 15 dígitos (limite do próprio E.164) ⇒ ParaE164 dá 16 chars, cabe em
+        // VARCHAR2(20) com folga.
+        var entrada = "+" + new string('9', 15);
+
+        NormalizadorTelefone.TentarNormalizar(entrada, out var armazenado).Should().BeTrue();
+        armazenado.Should().HaveLength(15);
+        NormalizadorTelefone.ParaE164(armazenado).Should().HaveLength(16);
+    }
+
+    [Fact]
+    public void ComDdiExplicito_ExatamenteNoPiso_Normaliza()
+    {
+        var entrada = "+" + new string('9', 10);
+
+        NormalizadorTelefone.TentarNormalizar(entrada, out var armazenado).Should().BeTrue();
+        armazenado.Should().HaveLength(10);
+    }
+
+    // ── ExtrairApenasDigitos (usado pela busca da Luna, I3) ──────────────────
+
+    [Theory]
+    [InlineData("14155550100", "14155550100")]
+    [InlineData("(11) 91234-5678", "11912345678")]
+    [InlineData("+55 11 91234-5678", "5511912345678")]
+    [InlineData("", "")]
+    public void ExtrairApenasDigitos_NaoInterpretaNadaSoExtrai(string entrada, string esperado)
+    {
+        NormalizadorTelefone.ExtrairApenasDigitos(entrada).Should().Be(esperado);
+    }
+
+    [Fact]
+    public void ExtrairApenasDigitos_EntradaNula_DevolveVazio()
+    {
+        NormalizadorTelefone.ExtrairApenasDigitos(null).Should().BeEmpty();
+    }
+
     [Fact]
     public void EntradaNula_DevolveFalse()
     {

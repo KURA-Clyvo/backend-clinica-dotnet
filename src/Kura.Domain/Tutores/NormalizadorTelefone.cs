@@ -32,17 +32,42 @@ namespace Kura.Domain.Tutores;
 /// (o <c>PUT</c> do <c>seed-demo-luna.sh</c> já manda <c>55…</c>, e o cadastro pode reenviar o
 /// valor que ele mesmo gravou). Para um número estrangeiro (ramo 1), o valor armazenado NUNCA
 /// carrega o <c>+</c> de volta — se ele tiver 10/11 dígitos, uma segunda passada o leria como
-/// nacional brasileiro. Isto é uma limitação DECLARADA (não testada como idempotente), porque a
-/// tela sempre tem o <c>+</c>/DDI explícito na entrada do usuário, nunca no valor já
-/// armazenado.</para>
+/// nacional brasileiro. Isto é uma limitação DECLARADA (não testada como idempotente):
+/// <list type="bullet">
+/// <item><description>No CADASTRO/PUT, um telefone estrangeiro EXIGE o <c>+</c> explícito —
+/// sem ele, a entrada é tratada como nacional brasileiro (ramo 3), como qualquer outro número
+/// de 10/11 dígitos. Reenviar o valor JÁ ARMAZENADO de um estrangeiro sem o <c>+</c> de volta
+/// (ex.: um <c>PUT</c> que ecoa <c>tutor.NrTelefone</c> cru) CORROMPE o dado — vira "55" + o que
+/// era um número de outro país. <c>mobile-clinica-rn</c> (REC-03) precisa SEMPRE enviar o
+/// telefone com <c>+</c>/DDI explícito quando reeditar um tutor estrangeiro; nunca reenviar o
+/// valor armazenado cru como se fosse entrada nova.</description></item>
+/// <item><description>Na BUSCA (<see cref="Kura.Application.Services.TutorService
+/// .BuscarContextoPorTelefoneAsync"/>), a ENTRADA não é normalizada antes de consultar — ver o
+/// método, achado G2 Important #3 (a normalização na entrada quebrava justamente o caso 6 do G0,
+/// estrangeiro de 10/11 dígitos, que o G0 marcava ✅ sem medir o efeito na busca).</description></item>
+/// </list></para>
 /// </summary>
 public static class NormalizadorTelefone
 {
     /// <summary>
+    /// Piso/teto de dígitos do valor ARMAZENADO — E.164 vale de 8 a 15 dígitos; este projeto usa
+    /// piso 10 (nenhum ramo de <see cref="TentarNormalizar"/> produz menos: o ramo nacional exige
+    /// 10/11 de entrada, o ramo BR exige 12/13, e só o ramo <c>+</c> explícito não tinha piso
+    /// nenhum antes deste guard — G2 fix wave, achado Important #2/Minor #6). Teto 15 é o próprio
+    /// limite do E.164; <c>ParaE164</c> de um valor de 15 dígitos dá 16 chars, cabe com folga em
+    /// <c>DS_TELEFONE</c>/<c>DS_WHATSAPP VARCHAR2(20)</c> (conferido em
+    /// <c>backend-tutor-java</c> <c>origin/main</c> <c>V1__initial_schema.sql:91-92</c>).
+    /// </summary>
+    private const int PisoDigitos = 10;
+    private const int TetoDigitos = 15;
+
+    /// <summary>
     /// Tenta normalizar <paramref name="entrada"/> para o formato que
     /// <c>TUTOR.DS_TELEFONE</c>/<c>DS_WHATSAPP</c> armazenam (só dígitos, sempre com DDI).
     /// Devolve <c>false</c> — e <paramref name="digitosArmazenados"/> vazio — quando a entrada
-    /// não se encaixa em nenhuma das formas conhecidas (nunca inventa/trunca dígitos).
+    /// não se encaixa em nenhuma das formas conhecidas (nunca inventa/trunca dígitos) OU quando
+    /// o resultado ficaria fora do intervalo <see cref="PisoDigitos"/>–<see cref="TetoDigitos"/>
+    /// dígitos (fecha o ramo <c>+</c> sem piso, ex. <c>"+1"</c> ⇒ 1 dígito, e o teto do E.164).
     /// </summary>
     public static bool TentarNormalizar(string? entrada, out string digitosArmazenados)
     {
@@ -57,29 +82,37 @@ public static class NormalizadorTelefone
         if (digitos.Length == 0)
             return false;
 
+        string candidato;
+
         // 1) DDI explícito (`+`) — qualquer país, armazena os dígitos sem o `+`.
         if (comDdiExplicito)
         {
-            digitosArmazenados = digitos;
-            return true;
+            candidato = digitos;
         }
-
         // 2) Já tem DDI do Brasil embutido, sem `+` (ex.: o que a Twilio entrega).
-        if ((digitos.Length == 12 || digitos.Length == 13) && digitos.StartsWith("55", StringComparison.Ordinal))
+        else if ((digitos.Length == 12 || digitos.Length == 13) && digitos.StartsWith("55", StringComparison.Ordinal))
         {
-            digitosArmazenados = digitos;
-            return true;
+            candidato = digitos;
         }
-
         // 3) Nacional (DDD + 8 ou 9 dígitos, sem DDI) — assume Brasil.
-        if (digitos.Length == 10 || digitos.Length == 11)
+        else if (digitos.Length == 10 || digitos.Length == 11)
         {
-            digitosArmazenados = "55" + digitos;
-            return true;
+            candidato = "55" + digitos;
+        }
+        // 4) Nenhuma forma reconhecida — inválido.
+        else
+        {
+            return false;
         }
 
-        // 4) Nenhuma forma reconhecida — inválido.
-        return false;
+        // G2 fix wave (Important #2/Minor #6): só o ramo 1 (`+` explícito) podia produzir um
+        // candidato fora do intervalo — os ramos 2/3 já são compatíveis por construção (12/13,
+        // ou "55"+10/11=12/13). Guard único no fim, em vez de duplicar a checagem por ramo.
+        if (candidato.Length < PisoDigitos || candidato.Length > TetoDigitos)
+            return false;
+
+        digitosArmazenados = candidato;
+        return true;
     }
 
     /// <summary>
@@ -87,6 +120,17 @@ public static class NormalizadorTelefone
     /// formato gravado em <c>TUTOR.DS_WHATSAPP</c>.
     /// </summary>
     public static string ParaE164(string digitosArmazenados) => "+" + digitosArmazenados;
+
+    /// <summary>
+    /// Extrai só os dígitos <c>[0-9]</c> de <paramref name="entrada"/>, SEM qualquer outra
+    /// interpretação (sem prefixar DDI, sem validar formato/intervalo) — usado por quem precisa
+    /// decidir COMO chamar <see cref="TentarNormalizar"/> antes de normalizar de verdade (ex.: a
+    /// busca da Luna em <c>TutorService.BuscarContextoPorTelefoneAsync</c>, G2 fix wave, achado
+    /// Important #3 — contar dígitos da entrada crua para saber se vale tentar o prefixo
+    /// nacional). <see langword="null"/> devolve string vazia.
+    /// </summary>
+    public static string ExtrairApenasDigitos(string? entrada) =>
+        entrada is null ? string.Empty : ExtrairDigitos(entrada);
 
     private static string ExtrairDigitos(string entrada)
     {
