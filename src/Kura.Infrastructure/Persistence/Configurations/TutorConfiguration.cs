@@ -40,6 +40,12 @@ public class TutorConfiguration : IEntityTypeConfiguration<Tutor>
             .HasMaxLength(20)
             .IsRequired();
 
+        // REC-01 (KURA_BACKLOG_RECEPCAO.md, A-12): coluna existente desde
+        // V1__initial_schema.sql:92 (backend-tutor-java), nullable, nunca mapeada antes.
+        builder.Property(e => e.DsWhatsapp)
+            .HasColumnName("DS_WHATSAPP")
+            .HasMaxLength(20);
+
         builder.Property(e => e.StAvisoPrivacidade)
             .HasColumnName("ST_AVISO_PRIVACIDADE")
             .HasColumnType("CHAR(1)")

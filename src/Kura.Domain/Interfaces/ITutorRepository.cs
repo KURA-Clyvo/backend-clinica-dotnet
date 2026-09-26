@@ -36,4 +36,19 @@ public interface ITutorRepository : IRepository<Tutor>
     /// propósito (ver TutorRepository.GetByTelefoneAsync para o raciocínio completo).
     /// </summary>
     Task<Tutor?> GetByTelefoneAsync(string numero);
+
+    /// <summary>
+    /// R3a (G2b fix wave 2, achado Minor — REC-01): conta tutores ATIVOS com <c>numero</c>
+    /// exato em <c>DS_TELEFONE</c> — 0, 1 ou 2 (capado, mesmo raciocínio de TASK-79: só
+    /// precisamos distinguir "não encontrado" de "ambíguo", nunca o total exato de colisões).
+    ///
+    /// <para>Existe porque <see cref="GetByTelefoneAsync"/> devolve <see langword="null"/> para
+    /// AMBOS os casos (0 e 2+), e <c>TutorService.BuscarContextoPorTelefoneAsync</c> precisa
+    /// distinguir os dois ANTES de decidir se tenta uma segunda chave de busca (prefixo
+    /// nacional "55"): TASK-79 tem que valer sobre o RESULTADO FINAL da busca — uma tentativa
+    /// exata AMBÍGUA já é "não encontrado" e NÃO deve cair na segunda tentativa, que poderia
+    /// achar um TERCEIRO tutor completamente diferente (achado original: dois tutores
+    /// colidentes no valor exato + um terceiro, distinto, sob o valor com prefixo).</para>
+    /// </summary>
+    Task<int> ContarAtivosPorTelefoneAsync(string numero);
 }
