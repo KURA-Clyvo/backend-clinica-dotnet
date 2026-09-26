@@ -119,6 +119,7 @@ public class TutorTokenNaoVazaNoLogTests
             Mock.Of<IRepository<Especie>>(),
             Mock.Of<IRepository<Raca>>(),
             inviteRepoMock.Object,
+            Mock.Of<IContaTutorRepository>(),
             uowMock.Object,
             Mock.Of<IClinicaContext>(),
             Mock.Of<IGeradorUrlFotoPet>(),

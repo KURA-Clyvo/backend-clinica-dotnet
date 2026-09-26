@@ -73,4 +73,62 @@ public class InviteTutorRepositoryTests
         // Assert
         resultado.Should().BeNull();
     }
+
+    /// <summary>
+    /// REC-02 (KURA_BACKLOG_RECEPCAO.md): prova, contra um KuraDbContext real (InMemory, não
+    /// mock), que <c>SoftDelete</c> (que <c>TutorService.ReemitirConviteAsync</c> usa para
+    /// cancelar o invite antigo) faz o invite desaparecer de <c>GetByTokenAsync</c> do lado .NET.
+    /// Aqui é <c>HasQueryFilter(e => e.StAtiva)</c> (InviteTutorConfiguration.cs:64) quem produz o
+    /// "desaparece" — não uma linha nova escrita nesta task.
+    /// ⚠️ O lado Java NÃO trata o token cancelado como "não encontrado": ele acha a linha
+    /// (<c>ST_ATIVO='N'</c>) e devolve 409 "Convite cancelado." (<c>InviteTutor.isAtivo()</c>,
+    /// verificado antes de usado/expirado em <c>OnboardingService.java:75-77</c>, commit d1522ee,
+    /// conferido na G2 da REC-02 em 2026-09-26 —
+    /// <c>git -C ../backend-tutor-java show d1522ee:src/main/java/br/com/clyvo/kura/tutor/onboarding/application/OnboardingService.java | sed -n '75,77p'</c>).
+    ///
+    /// Complementa (não substitui) a ancoragem do lado Java em rec-02-report.md: aquela prova
+    /// que <c>ST_ATIVO='N'</c> faz o Java jogar 409 "Convite cancelado." (via
+    /// <c>OnboardingServiceTest.deveLancar409SeInviteCancelado</c>, rodado ao vivo); esta prova
+    /// que o .NET, do lado de escrita, de fato grava esse estado a partir do mesmo
+    /// <c>SoftDelete</c> genérico (<c>Repository.cs:45-50</c>).
+    /// </summary>
+    [Fact]
+    public async Task SoftDelete_InviteAtivo_DesaparaceDeGetByTokenAsync()
+    {
+        // Arrange
+        var ctx = CreateContext();
+        var token = Guid.NewGuid();
+        var tutor = new Tutor { Id = 1, IdClinica = 1, NmTutor = "Maria Silva", NrCpf = "12345678901" };
+        ctx.Tutores.Add(tutor);
+        var invite = new InviteTutor
+        {
+            Id = 1,
+            IdTutor = 1,
+            NrToken = token,
+            DtExpiracao = DateTime.UtcNow.AddDays(7),
+            DsCanal = "WHATSAPP",
+            Tutor = tutor
+        };
+        ctx.Set<InviteTutor>().Add(invite);
+        await ctx.SaveChangesAsync();
+
+        var repository = new InviteTutorRepository(ctx);
+
+        // Controle positivo: antes do SoftDelete, o token É encontrado.
+        (await repository.GetByTokenAsync(token)).Should().NotBeNull();
+
+        // Act — mesmo SoftDelete genérico que TutorService.ReemitirConviteAsync chama.
+        repository.SoftDelete(invite);
+        await ctx.SaveChangesAsync();
+
+        // Assert — some da consulta padrão (query filter), a mesma forma de "não encontrado"
+        // usada em toda leitura deste projeto para dado soft-deletado.
+        (await repository.GetByTokenAsync(token)).Should().BeNull();
+
+        // E o valor persistido, ignorando o filtro, é StAtiva=false — que BoolToSimNaoConverter
+        // grava como ST_ATIVO='N' (ver rec-02-report.md para a ancoragem do lado Java).
+        var bruto = await ctx.Set<InviteTutor>().IgnoreQueryFilters()
+            .FirstAsync(i => i.NrToken == token);
+        bruto.StAtiva.Should().BeFalse();
+    }
 }

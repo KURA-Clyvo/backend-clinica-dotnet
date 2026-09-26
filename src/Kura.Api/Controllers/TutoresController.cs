@@ -110,6 +110,30 @@ public class TutoresController : ControllerBase
     }
 
     /// <summary>
+    /// REC-02 (KURA_BACKLOG_RECEPCAO.md): reemite o convite de onboarding de um tutor — gera um
+    /// novo token (7 dias) e cancela todo invite ativo e ainda não utilizado do mesmo tutor.
+    /// Mesma política de papel das outras rotas deste controller ([Authorize] de classe —
+    /// GESTOR e VETERINARIO são os únicos 2 papéis existentes hoje).
+    /// </summary>
+    /// <param name="id">Identificador do tutor.</param>
+    /// <returns>Dados do novo invite e o link de convite.</returns>
+    /// <response code="201">Novo invite criado; convites anteriores não utilizados cancelados.</response>
+    /// <response code="404">Tutor não encontrado (inclui tutor de outra clínica e tutor inativo — sem oráculo de existência).</response>
+    /// <response code="409">Tutor já possui conta (onboarding já concluído).</response>
+    [HttpPost("{id:long}/convite")]
+    [ProducesResponseType(typeof(InviteTutorReemitidoResponseDto), 201)]
+    [ProducesResponseType(typeof(ProblemDetails), 404)]
+    [ProducesResponseType(typeof(ProblemDetails), 409)]
+    public async Task<IActionResult> ReemitirConvite(long id)
+    {
+        if (!long.TryParse(User.FindFirst("clinicaId")?.Value, out var clinicaId))
+            return Unauthorized();
+
+        var result = await _service.ReemitirConviteAsync(id, clinicaId);
+        return StatusCode(StatusCodes.Status201Created, result);
+    }
+
+    /// <summary>
     /// Atualiza os dados de um tutor existente.
     /// </summary>
     /// <param name="id">Identificador do tutor.</param>

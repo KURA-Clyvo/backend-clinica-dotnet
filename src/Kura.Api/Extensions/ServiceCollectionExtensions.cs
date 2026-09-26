@@ -110,6 +110,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITriagemLunaRepository, TriagemLunaRepository>();
         services.AddScoped<IInviteTutorRepository, InviteTutorRepository>();
         services.AddScoped<IConsentimentoRepository, ConsentimentoRepository>();
+        services.AddScoped<IContaTutorRepository, ContaTutorRepository>();
 
         // FT-02 (backlog KURA_BACKLOG_FOTO_PET.md): armazenamento de arquivo (foto de pet,
         // hoje) e URL assinada. ArmazenamentoLocalDisco reaproveita Storage:BasePath (mesma

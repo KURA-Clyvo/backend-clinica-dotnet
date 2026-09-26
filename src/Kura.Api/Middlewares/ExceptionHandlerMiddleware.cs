@@ -110,6 +110,10 @@ public class ExceptionHandlerMiddleware
             EntidadeNaoEncontradaException => StatusCodes.Status404NotFound,
             RegraDeNegocioException => StatusCodes.Status422UnprocessableEntity,
             ConflitoConcorrenciaException => StatusCodes.Status409Conflict,
+            // REC-02: tutor já tem conta (CONTA_TUTOR do Java) — reemitir convite não faz
+            // sentido. 409 diferente da ConflitoConcorrenciaException acima (aquela é sobre
+            // NR_VERSION/optimistic locking, mensagem errada para este caso).
+            TutorComContaExistenteException => StatusCodes.Status409Conflict,
             UnauthorizedAccessException => StatusCodes.Status401Unauthorized,
             // FT-03 (backlog KURA_BACKLOG_FOTO_PET.md): o Kestrel lança esta exceção quando
             // o corpo da requisição excede o limite configurado por [RequestSizeLimit]

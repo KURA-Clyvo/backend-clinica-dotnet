@@ -14,6 +14,16 @@ public interface ITutorService
     Task SoftDeleteAsync(long id);
 
     /// <summary>
+    /// REC-02 (KURA_BACKLOG_RECEPCAO.md): reemite o convite de onboarding de um tutor —
+    /// gera um novo token (7 dias), cancela (soft delete) todo invite ativo e ainda não
+    /// utilizado do mesmo tutor, e devolve o novo link. A-7: escopo por clínica à mão via
+    /// <c>ITutorRepository.GetByIdAsync(id, idClinica)</c> — tutor de outra clínica ou
+    /// inativo devolve o MESMO 404 de tutor inexistente (sem oráculo de existência).
+    /// Tutor que já concluiu o onboarding (existe <c>CONTA_TUTOR</c>) ⇒ 409.
+    /// </summary>
+    Task<InviteTutorReemitidoResponseDto> ReemitirConviteAsync(long id, long clinicaId);
+
+    /// <summary>
     /// TASK-67: GET /api/v1/tutores/telefone/{numero} — consumido pela IA Luna para
     /// resolver clínica + pets a partir do WhatsApp, antes de registrar interações.
     /// Deliberadamente sem escopo de clínica (ver ITutorRepository.GetByTelefoneAsync).
