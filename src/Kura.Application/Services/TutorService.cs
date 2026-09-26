@@ -160,56 +160,80 @@ public sealed class TutorService : ITutorService
         tutor.NrCpf = dto.NrCpf;
         tutor.DsEmail = dto.DsEmail;
 
-        // I1 (G2 fix wave, achado Important #1 — LGPD): capturado ANTES de mutar
+        // R1a (G2b fix wave 2, achado Important — LGPD): capturado ANTES de mutar
         // tutor.NrTelefone, porque a regra de "acompanhar o telefone novo" olha o estado
-        // ANTIGO. `tutor.NrTelefone` já é o valor ARMAZENADO (dígitos, ou o sentinela) — não
-        // precisa passar por TentarNormalizar de novo, e evita a armadilha de idempotência do
-        // ramo `+`/estrangeiro (ver NormalizadorTelefone). `DsWhatsapp == null` conta como
-        // "era o mesmo número" — é o estado de todo tutor criado ANTES da REC-01 (G0 item 4:
-        // nulo nos 18 tutores existentes), então editar o telefone desses tutores também
-        // atualiza o WhatsApp em vez de deixá-lo divergente para sempre.
-        var whatsappEraMesmoNumero = tutor.DsWhatsapp is null
-            || tutor.DsWhatsapp == NormalizadorTelefone.ParaE164(tutor.NrTelefone);
-
-        // REC-01 (G0 item 4): o PUT NÃO exige telefone (recomendação do maestro — não quebrar
-        // edição parcial de tutor antigo sem telefone); TASK-60 continua coalescendo para o
-        // sentinela quando vazio. Quando o campo VEM preenchido, normaliza (idempotente) para o
-        // tutor editado casar com o formato que a Luna usa na busca — TutorUpdateValidator já
-        // bloqueia formato inválido (400) antes de chegar aqui; o throw é defesa em
-        // profundidade, nunca grava lixo mesmo se alcançado por outro caminho.
-        if (string.IsNullOrWhiteSpace(dto.NrTelefone))
+        // ANTIGO. CORREÇÃO da fix wave 1: aquela versão comparava `DsWhatsapp` com
+        // `'+' + tutor.NrTelefone` CRU, assumindo "o valor armazenado já é o que
+        // TentarNormalizar produziria" — FALSO para tutor legado pré-REC-01, cujo
+        // `DS_TELEFONE` pode estar em formato nacional cru (ex.: `seed-demo-luna.sh` antes do
+        // fix A1 de 16/09 gravava `TELEFONE_CONTATO` nacional e `DS_WHATSAPP` em E.164 do MESMO
+        // número por `UPDATE` SQL direto) — nesse caso "+11988880001" ≠ "+5511988880001" e a
+        // comparação crua nunca reconhecia "mesmo número". Fix: normaliza o telefone ANTIGO
+        // antes de comparar. Se ele não for normalizável (sentinela "Não informado", lixo
+        // legado) ⇒ trata como "NÃO era o mesmo número" — EXCETO quando `DsWhatsapp` já é
+        // `null` (nada para comparar; é o estado de todo tutor criado antes da REC-01, G0 item
+        // 4: nulo nos 18 tutores existentes), que sempre acompanha.
+        bool whatsappEraMesmoNumero;
+        if (tutor.DsWhatsapp is null)
         {
-            tutor.NrTelefone = "Não informado";
+            whatsappEraMesmoNumero = true;
         }
-        else if (NormalizadorTelefone.TentarNormalizar(dto.NrTelefone, out var telefoneArmazenado))
+        else if (NormalizadorTelefone.TentarNormalizar(tutor.NrTelefone, out var telefoneAntigoNormalizado))
         {
-            tutor.NrTelefone = telefoneArmazenado;
+            whatsappEraMesmoNumero = tutor.DsWhatsapp == NormalizadorTelefone.ParaE164(telefoneAntigoNormalizado);
         }
         else
         {
-            throw new RegraDeNegocioException("Telefone inválido.");
+            whatsappEraMesmoNumero = false;
         }
 
-        // I1: 3 ramos, na ordem do achado da G2 (M5/M6 — PUT trocava DS_TELEFONE e deixava
-        // DS_WHATSAPP com o número antigo; o lembrete de vacina ia para o número errado).
-        // 1) DsWhatsapp veio no corpo ⇒ normaliza e grava (a recepção está corrigindo os dois
-        //    campos explicitamente).
-        // 2) Não veio, e o WhatsApp ERA "o mesmo número" do telefone antigo ⇒ acompanha o
-        //    telefone NOVO (já normalizado acima) — só se o novo valor for normalizável (nunca
-        //    grava "+Não informado" quando o telefone volta a ficar vazio).
-        // 3) Não veio, e era DIFERENTE do telefone ⇒ mantém intocado (era intencionalmente um
-        //    número de WhatsApp distinto do telefone de contato).
+        // R1c (G2b fix wave 2, achado Important — LGPD, mesmo defeito por outro vetor): a fix
+        // wave 1 gravava o sentinela "Não informado" por cima do telefone real quando o PUT
+        // vinha sem telefone, e isso desligava o acompanhamento do WhatsApp PARA SEMPRE (o PUT
+        // seguinte com telefone novo comparava contra "+Não informado", nunca normalizável ⇒
+        // ramo 3 ⇒ WhatsApp nunca mais acompanha — reproduz o mesmo sintoma do M5 da G2
+        // original, por um vetor diferente). Ruling do maestro: PUT sem telefone (ausente/
+        // vazio) MANTÉM o telefone atual — nunca sobrescreve. O sentinela "Não informado" deixa
+        // de ser PRODUZIDO por qualquer código novo (Create já o exige; Update agora preserva);
+        // ele só existe em dado legado que nenhuma rota atual volta a gravar.
+        var telefoneMudou = !string.IsNullOrWhiteSpace(dto.NrTelefone);
+        if (telefoneMudou)
+        {
+            if (NormalizadorTelefone.TentarNormalizar(dto.NrTelefone, out var telefoneArmazenado))
+            {
+                tutor.NrTelefone = telefoneArmazenado;
+            }
+            else
+            {
+                throw new RegraDeNegocioException("Telefone inválido.");
+            }
+        }
+        // else: ausente/vazio ⇒ mantém tutor.NrTelefone como estava — TutorUpdateValidator não
+        // exige o campo (recomendação do maestro, G0 item 4 — não quebrar edição parcial).
+
+        // 3 ramos, na ordem do achado original (M5/M6 da G2 — PUT trocava DS_TELEFONE e deixava
+        // DS_WHATSAPP com o número antigo; o lembrete de vacina ia para o número errado):
+        // 1) DsWhatsapp veio no corpo (não vazio/whitespace — "" conta como AUSENTE, não como
+        //    "limpar o campo": não há hoje forma de limpar o WhatsApp pelo PUT, documentado em
+        //    TutorUpdateDto) ⇒ normaliza e grava (a recepção está corrigindo os dois campos
+        //    explicitamente).
+        // 2) Não veio, o TELEFONE de fato mudou (R1c: se não mudou, não há o que "acompanhar")
+        //    E o WhatsApp ERA "o mesmo número" do telefone ANTIGO (R1a) ⇒ acompanha o telefone
+        //    NOVO (já normalizado e válido por construção, dado que telefoneMudou implica que o
+        //    bloco acima já validou/normalizou com sucesso).
+        // 3) Qualquer outro caso ⇒ mantém intocado (era intencionalmente um número de WhatsApp
+        //    distinto do telefone de contato, ou o telefone não mudou de verdade).
         if (!string.IsNullOrWhiteSpace(dto.DsWhatsapp))
         {
             if (!NormalizadorTelefone.TentarNormalizar(dto.DsWhatsapp, out var whatsappArmazenado))
                 throw new RegraDeNegocioException("WhatsApp inválido.");
             tutor.DsWhatsapp = NormalizadorTelefone.ParaE164(whatsappArmazenado);
         }
-        else if (whatsappEraMesmoNumero && NormalizadorTelefone.TentarNormalizar(tutor.NrTelefone, out _))
+        else if (telefoneMudou && whatsappEraMesmoNumero)
         {
             tutor.DsWhatsapp = NormalizadorTelefone.ParaE164(tutor.NrTelefone);
         }
-        // senão: mantém tutor.DsWhatsapp como estava (ramo 3, ou telefone novo é o sentinela).
+        // senão: mantém tutor.DsWhatsapp como estava.
 
         _repository.Update(tutor);
         await _uow.CommitAsync();
@@ -230,12 +254,11 @@ public sealed class TutorService : ITutorService
         // partir do telefone para um caller sem JWT (a IA Luna). Ver comentário em
         // ITutorRepository.GetByTelefoneAsync. Mensagem de erro (se o tutor não existir)
         // nunca deve interpolar `numero` — LGPD, ver LgpdNaoVazamentoTests.
-        // TASK-79: `tutor is null` cobre TANTO "nenhum tutor com esse telefone" QUANTO
+        // TASK-79: "não encontrado" cobre TANTO "nenhum tutor com esse telefone" QUANTO
         // "mais de um tutor ativo com esse telefone, qualquer clínica — inclusive dois
-        // da MESMA clínica" — o repositório já resolve a ambiguidade para null, ver
-        // TutorRepository.
+        // da MESMA clínica".
         //
-        // I3 (G2 fix wave, achado Important #3): a Luna SEMPRE manda os dígitos
+        // I3 (G2 fix wave 1, achado Important #3): a Luna SEMPRE manda os dígitos
         // internacionais completos (twilio_inbound.py:32 só tira "whatsapp:"/"+", nunca
         // reformata) — tenta PRIMEIRO com a entrada exatamente como chegou (só dígitos, sem
         // reinterpretar DDI). Normalizar a entrada ANTES de buscar (versão anterior desta
@@ -245,15 +268,38 @@ public sealed class TutorService : ITutorService
         // ou seja, o caso 6 do G0 nunca era encontrado pela Luna, ao contrário do que a tabela
         // original alegava. Só tenta com o prefixo "55" se a primeira busca não achar E a
         // entrada tiver 10/11 dígitos (formato nacional sem DDI — nunca é o que a Luna manda,
-        // mas cobre chamada manual/smoke com número legado). TASK-79 (2+ ativos ⇒ null)
-        // continua dentro de GetByTelefoneAsync, aplicada em CADA tentativa individualmente.
+        // mas cobre chamada manual/smoke com número legado).
+        //
+        // R3a (G2b fix wave 2, achado Minor): TASK-79 precisa valer sobre o RESULTADO FINAL da
+        // busca, não por tentativa isolada. A versão anterior chamava GetByTelefoneAsync
+        // direto em cada tentativa — que já resolve AMBIGUIDADE (2+) para null internamente —
+        // então uma tentativa exata AMBÍGUA (null) era indistinguível de "não encontrado" (0) e
+        // caía no fallback "55", que podia achar um TERCEIRO tutor completamente diferente do
+        // par ambíguo original. Fix: conta ANTES de buscar (ContarAtivosPorTelefoneAsync,
+        // mesmo Take(2) de GetByTelefoneAsync) para decidir corretamente — só tenta o fallback
+        // quando a exata deu ZERO; se deu 2+ (ambíguo), o resultado FINAL já é "não encontrado"
+        // e a busca PARA, sem tentar outra chave.
         var digitosEntrada = NormalizadorTelefone.ExtrairApenasDigitos(numero);
         var chaveBusca = digitosEntrada.Length == 0 ? numero : digitosEntrada;
-        var tutor = await _repository.GetByTelefoneAsync(chaveBusca);
-        if (tutor is null && (digitosEntrada.Length == 10 || digitosEntrada.Length == 11))
+
+        Tutor? tutor = null;
+        var candidatosExatos = await _repository.ContarAtivosPorTelefoneAsync(chaveBusca);
+        if (candidatosExatos == 1)
         {
-            tutor = await _repository.GetByTelefoneAsync("55" + digitosEntrada);
+            tutor = await _repository.GetByTelefoneAsync(chaveBusca);
         }
+        else if (candidatosExatos == 0 && (digitosEntrada.Length == 10 || digitosEntrada.Length == 11))
+        {
+            var chaveFallback = "55" + digitosEntrada;
+            var candidatosFallback = await _repository.ContarAtivosPorTelefoneAsync(chaveFallback);
+            if (candidatosFallback == 1)
+            {
+                tutor = await _repository.GetByTelefoneAsync(chaveFallback);
+            }
+            // candidatosFallback == 0 ou 2+ ⇒ tutor permanece null (TASK-79 no fallback também).
+        }
+        // candidatosExatos >= 2 ⇒ tutor permanece null — AMBÍGUO é resultado final, sem fallback.
+
         if (tutor is null)
             return null;
 

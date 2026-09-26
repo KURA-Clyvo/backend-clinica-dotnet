@@ -301,4 +301,87 @@ public class TutorRepositoryTests
         // Assert
         resultado.Should().BeNull();
     }
+
+    // ── ContarAtivosPorTelefoneAsync (R3a, G2b fix wave 2) ───────────────────
+
+    [Fact]
+    public async Task ContarAtivosPorTelefoneAsync_NenhumTutor_DevolveZero()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        using var ctx = CreateContext(dbName);
+        var repo = new TutorRepository(ctx, NullLogger<TutorRepository>.Instance);
+
+        var resultado = await repo.ContarAtivosPorTelefoneAsync("5511900001111");
+
+        resultado.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ContarAtivosPorTelefoneAsync_UmTutorAtivo_DevolveUm()
+    {
+        const string telefone = "5511988880030";
+        var dbName = Guid.NewGuid().ToString();
+
+        using (var seedCtx = CreateContext(dbName))
+        {
+            seedCtx.Clinicas.Add(NovaClinica(1, "Clinica A"));
+            seedCtx.Tutores.Add(NovoTutor(60, idClinica: 1, "Unico", "11122233355", telefone));
+            await seedCtx.SaveChangesAsync();
+        }
+
+        using var ctx = CreateContext(dbName);
+        var repo = new TutorRepository(ctx, NullLogger<TutorRepository>.Instance);
+
+        var resultado = await repo.ContarAtivosPorTelefoneAsync(telefone);
+
+        resultado.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ContarAtivosPorTelefoneAsync_DoisTutoresAtivosColidentes_DevolveDois()
+    {
+        const string telefoneColidente = "11988880030";
+        var dbName = Guid.NewGuid().ToString();
+
+        using (var seedCtx = CreateContext(dbName))
+        {
+            seedCtx.Clinicas.AddRange(NovaClinica(1, "Clinica A"), NovaClinica(2, "Clinica B"));
+            seedCtx.Tutores.AddRange(
+                NovoTutor(61, idClinica: 1, "Colidente1", "11122233366", telefoneColidente),
+                NovoTutor(62, idClinica: 2, "Colidente2", "22233344477", telefoneColidente));
+            await seedCtx.SaveChangesAsync();
+        }
+
+        using var ctx = CreateContext(dbName);
+        var repo = new TutorRepository(ctx, NullLogger<TutorRepository>.Instance);
+
+        var resultado = await repo.ContarAtivosPorTelefoneAsync(telefoneColidente);
+
+        // 2, não mais que isso: é o mesmo Take(2) de GetByTelefoneAsync — só precisamos
+        // distinguir 0/1/2+, nunca o total exato de colisões.
+        resultado.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task ContarAtivosPorTelefoneAsync_TutorInativoComTelefoneColidenteComAtivo_ContaSoOAtivo()
+    {
+        const string telefone = "5511988880040";
+        var dbName = Guid.NewGuid().ToString();
+
+        using (var seedCtx = CreateContext(dbName))
+        {
+            seedCtx.Clinicas.Add(NovaClinica(1, "Clinica A"));
+            seedCtx.Tutores.AddRange(
+                NovoTutor(63, idClinica: 1, "Inativo", "11122233388", telefone, ativo: false),
+                NovoTutor(64, idClinica: 1, "Ativo", "22233344499", telefone));
+            await seedCtx.SaveChangesAsync();
+        }
+
+        using var ctx = CreateContext(dbName);
+        var repo = new TutorRepository(ctx, NullLogger<TutorRepository>.Instance);
+
+        var resultado = await repo.ContarAtivosPorTelefoneAsync(telefone);
+
+        resultado.Should().Be(1, "o filtro global de StAtiva exclui o inativo — só o ativo conta");
+    }
 }

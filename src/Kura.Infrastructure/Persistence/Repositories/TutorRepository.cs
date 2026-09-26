@@ -103,4 +103,12 @@ public class TutorRepository : Repository<Tutor>, ITutorRepository
 
         return candidatos.SingleOrDefault();
     }
+
+    /// <summary>
+    /// R3a (G2b fix wave 2): mesmo filtro/Take(2) de <see cref="GetByTelefoneAsync"/>, mas
+    /// devolve a CONTAGEM (0, 1 ou 2) em vez do tutor — permite ao chamador distinguir "não
+    /// encontrado" (0) de "ambíguo" (2) antes de decidir se tenta outra chave de busca.
+    /// </summary>
+    public Task<int> ContarAtivosPorTelefoneAsync(string numero) =>
+        _dbSet.Where(t => t.NrTelefone == numero).Take(2).CountAsync();
 }

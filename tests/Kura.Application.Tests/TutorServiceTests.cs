@@ -356,12 +356,19 @@ public class TutorServiceTests
         tokenRecebidoPeloGerador.Should().Be(inviteCapturado!.NrToken);
     }
 
-    // REC-01 (G0 item 4): recomendação do maestro — o PUT continua NÃO exigindo telefone (não
-    // quebrar edição parcial). TASK-60 (sentinela quando vazio) continua valendo sem mudança.
+    // R1c (G2b fix wave 2, achado Important — LGPD): ruling do maestro REVERTE o
+    // comportamento da fix wave 1 aqui. Antes, PUT sem telefone gravava o sentinela "Não
+    // informado" por cima do telefone REAL — o que desligava o acompanhamento do WhatsApp
+    // PARA SEMPRE no PUT seguinte (a comparação contra "+Não informado" nunca é "mesmo
+    // número"). O sentinela deixou de ser PRODUZIDO por qualquer código novo (Create exige
+    // telefone; Update agora preserva) — ele só existe em dado legado que nenhuma rota atual
+    // volta a gravar. Mordida: voltar ao coalesce para o sentinela faz este teste (e o
+    // check #6 do smoke, "PUT sem nrTelefone espera 200" — que continua válido, pois o `200`
+    // não dependia do VALOR gravado) ficarem vermelhos aqui.
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    public async Task UpdateAsync_NrTelefoneVazioOuWhitespace_ColescaParaSentinela(string nrTelefoneBruto)
+    public async Task UpdateAsync_NrTelefoneAusenteOuWhitespace_MantemOTelefoneAtual(string nrTelefoneBruto)
     {
         // Arrange
         var tutorExistente = new Tutor { Id = 42L, NmTutor = "Maria", NrTelefone = "11900000000" };
@@ -379,8 +386,8 @@ public class TutorServiceTests
         // Act
         await _sut.UpdateAsync(42L, dto);
 
-        // Assert
-        tutorExistente.NrTelefone.Should().Be("Não informado");
+        // Assert — NÃO é mais "Não informado": o telefone real permanece intocado.
+        tutorExistente.NrTelefone.Should().Be("11900000000");
         _tutorRepoMock.Verify(r => r.Update(It.IsAny<Tutor>()), Times.Once);
     }
 
@@ -555,10 +562,16 @@ public class TutorServiceTests
     }
 
     [Fact]
-    public async Task UpdateAsync_TelefoneNaoMudaEraMesmoNumero_DsWhatsappPermaneceLigadoAoAntigo()
+    public async Task UpdateAsync_NrTelefoneAusente_TelefoneRealmenteNaoMudaEDsWhatsappPermaneceIntocado()
     {
-        // Guarda contra "+Não informado": se o telefone novo vier vazio (sentinela), o ramo 2
-        // não deve tentar acompanhar um valor não-normalizável.
+        // R1c/R6 (G2b fix wave 2): a versão anterior deste teste (M2 da re-G2) tinha nome e
+        // mensagem enganosos — o telefone "não mudava de verdade" mas o CÓDIGO gravava o
+        // sentinela por cima dele, então na prática ele MUDAVA (para "Não informado"), e a
+        // asserção consagrava como correto o WhatsApp preso ao número antigo — exatamente o
+        // sintoma de LGPD que a fix wave deveria fechar (R1c). Agora, com o ruling do maestro
+        // (PUT sem telefone MANTÉM o atual), o telefone de fato NÃO muda — e é por isso, não
+        // por uma guarda de sentinela, que o WhatsApp permanece intocado (telefoneMudou=false
+        // pula o ramo de "acompanhar" inteiro).
         var tutorExistente = new Tutor
         {
             Id = 45L, NmTutor = "Maria", NrTelefone = "5511900000000", DsWhatsapp = "+5511900000000"
@@ -568,13 +581,141 @@ public class TutorServiceTests
         var dto = new TutorUpdateDto
         {
             NmTutor = "Maria", NrCpf = "12345678901", DsEmail = "maria@email.com",
-            NrTelefone = "" // sentinela
+            NrTelefone = "" // ausente
         };
 
         await _sut.UpdateAsync(45L, dto);
 
-        tutorExistente.NrTelefone.Should().Be("Não informado");
-        tutorExistente.DsWhatsapp.Should().Be("+5511900000000", "telefone não mudou de verdade (voltou a vazio) — DsWhatsapp não deve virar '+Não informado'");
+        tutorExistente.NrTelefone.Should().Be("5511900000000", "PUT sem telefone mantém o atual (R1c) — nunca mais grava o sentinela por cima do valor real");
+        tutorExistente.DsWhatsapp.Should().Be("+5511900000000", "nada mudou: sem o telefone mudar, não há o que 'acompanhar'");
+    }
+
+    [Fact]
+    public async Task UpdateAsync_TutorLegadoTelefoneNacionalCruMaisWhatsappE164DoMesmoNumero_Acompanha()
+    {
+        // R1a (G2b fix wave 2, achado Important — LGPD): a versão anterior comparava
+        // DsWhatsapp com "+" + tutor.NrTelefone CRU — para este tutor LEGADO (DS_TELEFONE
+        // nacional cru, sem passar pela normalização da REC-01; DS_WHATSAPP já em E.164 do
+        // MESMO número, exatamente o estado que o seed-demo-luna.sh produzia antes do fix A1
+        // de 16/09), "+11988880001" ≠ "+5511988880001" ⇒ ramo 3 (mantém) ⇒ o PUT trocava o
+        // telefone e deixava o WhatsApp no número ANTIGO. Mordida: voltar à comparação crua
+        // faz este teste falhar.
+        var tutorLegado = new Tutor
+        {
+            Id = 47L, NmTutor = "Legado", NrTelefone = "11988880001", DsWhatsapp = "+5511988880001"
+        };
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(47L)).ReturnsAsync(tutorLegado);
+
+        var dto = new TutorUpdateDto
+        {
+            NmTutor = "Legado", NrCpf = "12345678901", DsEmail = "legado@email.com",
+            NrTelefone = "(11) 97777-0002"
+        };
+
+        await _sut.UpdateAsync(47L, dto);
+
+        tutorLegado.NrTelefone.Should().Be("5511977770002");
+        tutorLegado.DsWhatsapp.Should().Be(
+            "+5511977770002",
+            "o WhatsApp legado era o MESMO número do telefone legado (uma vez normalizado) — tem que acompanhar");
+    }
+
+    [Fact]
+    public async Task UpdateAsync_TutorLegadoTelefoneNacionalCruMaisWhatsappDiferente_Mantem()
+    {
+        // R1a: controle negativo — o telefone legado normaliza para "5511988880001", mas o
+        // WhatsApp é de um número DIFERENTE ⇒ não acompanha (ramo 3).
+        var tutorLegado = new Tutor
+        {
+            Id = 48L, NmTutor = "Legado", NrTelefone = "11988880001", DsWhatsapp = "+5511777776666"
+        };
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(48L)).ReturnsAsync(tutorLegado);
+
+        var dto = new TutorUpdateDto
+        {
+            NmTutor = "Legado", NrCpf = "12345678901", DsEmail = "legado@email.com",
+            NrTelefone = "(11) 97777-0002"
+        };
+
+        await _sut.UpdateAsync(48L, dto);
+
+        tutorLegado.DsWhatsapp.Should().Be("+5511777776666", "era um WhatsApp diferente do telefone legado — não acompanha");
+    }
+
+    [Fact]
+    public async Task UpdateAsync_TelefoneAntigoEraSentinelaLixo_DsWhatsappNaoNuloNaoAcompanha()
+    {
+        // R1a: telefone antigo NÃO normalizável (sentinela "Não informado", dado legado) e
+        // DsWhatsapp NÃO nulo ⇒ "não era o mesmo número" (não há como confirmar) ⇒ mantém.
+        var tutorComSentinela = new Tutor
+        {
+            Id = 49L, NmTutor = "Legado", NrTelefone = "Não informado", DsWhatsapp = "+5511988880009"
+        };
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(49L)).ReturnsAsync(tutorComSentinela);
+
+        var dto = new TutorUpdateDto
+        {
+            NmTutor = "Legado", NrCpf = "12345678901", DsEmail = "legado@email.com",
+            NrTelefone = "(11) 97777-0002"
+        };
+
+        await _sut.UpdateAsync(49L, dto);
+
+        tutorComSentinela.DsWhatsapp.Should().Be("+5511988880009", "telefone antigo era lixo (sentinela) — não dá para confirmar 'mesmo número', então não acompanha");
+    }
+
+    [Fact]
+    public async Task UpdateAsync_TelefoneAntigoEraSentinelaLixoMasDsWhatsappNulo_Acompanha()
+    {
+        // R1a: exceção explícita da ruling — DsWhatsapp NULO sempre acompanha, mesmo quando o
+        // telefone antigo é lixo/sentinela (nada para comparar, então não há motivo para NÃO
+        // preencher o WhatsApp agora que o telefone ficou válido).
+        var tutorComSentinela = new Tutor
+        {
+            Id = 50L, NmTutor = "Legado", NrTelefone = "Não informado", DsWhatsapp = null
+        };
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(50L)).ReturnsAsync(tutorComSentinela);
+
+        var dto = new TutorUpdateDto
+        {
+            NmTutor = "Legado", NrCpf = "12345678901", DsEmail = "legado@email.com",
+            NrTelefone = "(11) 97777-0002"
+        };
+
+        await _sut.UpdateAsync(50L, dto);
+
+        tutorComSentinela.DsWhatsapp.Should().Be("+5511977770002");
+    }
+
+    [Fact]
+    public async Task UpdateAsync_PutParcialSemTelefoneDepoisPutComTelefoneNovo_AcompanhaMesmoAssim()
+    {
+        // R1c (regressão direta da sonda do G2b, M1/R1c): um PUT parcial sem telefone (que
+        // MANTÉM o atual, R1c) não deve "prender" o WhatsApp de forma que um PUT SEGUINTE com
+        // telefone novo deixe de acompanhar. Como o telefone real nunca foi trocado pelo
+        // sentinela, o segundo PUT continua vendo o estado "mesmo número" corretamente.
+        var tutor = new Tutor
+        {
+            Id = 51L, NmTutor = "Legado", NrTelefone = "5511988880003", DsWhatsapp = "+5511988880003"
+        };
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(51L)).ReturnsAsync(tutor);
+
+        // 1º PUT: parcial, sem telefone (edição só de nome, por exemplo).
+        await _sut.UpdateAsync(51L, new TutorUpdateDto
+        {
+            NmTutor = "Legado Editado", NrCpf = "12345678901", DsEmail = "legado@email.com"
+        });
+        tutor.NrTelefone.Should().Be("5511988880003", "PUT parcial não deveria ter tocado o telefone");
+
+        // 2º PUT: agora com telefone novo.
+        await _sut.UpdateAsync(51L, new TutorUpdateDto
+        {
+            NmTutor = "Legado Editado", NrCpf = "12345678901", DsEmail = "legado@email.com",
+            NrTelefone = "(11) 97777-0004"
+        });
+
+        tutor.NrTelefone.Should().Be("5511977770004");
+        tutor.DsWhatsapp.Should().Be("+5511977770004", "o WhatsApp continua acompanhando — o PUT parcial anterior não desligou nada");
     }
 
     [Fact]
@@ -630,6 +771,11 @@ public class TutorServiceTests
         var especie = new Especie { Id = 1, NmEspecie = "Cachorro" };
         var raca = new Raca { Id = 5, IdEspecie = 1, NmRaca = "Vira-lata" };
 
+        // R3a (G2b fix wave 2): a decisão de tentar a busca exata depende da CONTAGEM antes de
+        // buscar (ContarAtivosPorTelefoneAsync) — sem este setup, a contagem padrão do mock
+        // (0, loose mock) faria a busca cair direto no "não encontrado", nem chamando
+        // GetByTelefoneAsync.
+        _tutorRepoMock.Setup(r => r.ContarAtivosPorTelefoneAsync("5511999990000")).ReturnsAsync(1);
         _tutorRepoMock.Setup(r => r.GetByTelefoneAsync("5511999990000")).ReturnsAsync(tutor);
         _tutorPetRepoMock.Setup(r => r.GetByTutorIdAsync(tutor.Id))
             .ReturnsAsync(new List<TutorPet> { new() { IdTutor = tutor.Id, IdPet = pet.Id, Pet = pet } });
@@ -657,6 +803,7 @@ public class TutorServiceTests
     {
         // Arrange
         var tutor = new Tutor { Id = 8, IdClinica = 42, NmTutor = "Ciclano", NrTelefone = "5511988887777", StAtiva = true };
+        _tutorRepoMock.Setup(r => r.ContarAtivosPorTelefoneAsync("5511988887777")).ReturnsAsync(1);
         _tutorRepoMock.Setup(r => r.GetByTelefoneAsync("5511988887777")).ReturnsAsync(tutor);
         _tutorPetRepoMock.Setup(r => r.GetByTutorIdAsync(tutor.Id)).ReturnsAsync(new List<TutorPet>());
 
@@ -679,7 +826,11 @@ public class TutorServiceTests
         // que o caso NACIONAL LEGADO continua achando, agora via as DUAS tentativas na ordem
         // certa (cru primeiro, "55"+dígitos depois).
         var tutor = new Tutor { Id = 9, IdClinica = 42, NmTutor = "Nacional", NrTelefone = "5511999990000", StAtiva = true };
-        _tutorRepoMock.Setup(r => r.GetByTelefoneAsync("11999990000")).ReturnsAsync((Tutor?)null);
+        // R3a (G2b fix wave 2): a decisão de tentar o fallback agora vem de
+        // ContarAtivosPorTelefoneAsync — exata (0, "não encontrado") ⇒ tenta o fallback (55...,
+        // 1, "encontrado unicamente") ⇒ SÓ ENTÃO chama GetByTelefoneAsync para buscar de verdade.
+        _tutorRepoMock.Setup(r => r.ContarAtivosPorTelefoneAsync("11999990000")).ReturnsAsync(0);
+        _tutorRepoMock.Setup(r => r.ContarAtivosPorTelefoneAsync("5511999990000")).ReturnsAsync(1);
         _tutorRepoMock.Setup(r => r.GetByTelefoneAsync("5511999990000")).ReturnsAsync(tutor);
         _tutorPetRepoMock.Setup(r => r.GetByTutorIdAsync(tutor.Id)).ReturnsAsync(new List<TutorPet>());
 
@@ -688,7 +839,9 @@ public class TutorServiceTests
 
         // Assert
         result.Should().NotBeNull();
-        _tutorRepoMock.Verify(r => r.GetByTelefoneAsync("11999990000"), Times.Once);
+        _tutorRepoMock.Verify(r => r.ContarAtivosPorTelefoneAsync("11999990000"), Times.Once);
+        _tutorRepoMock.Verify(r => r.ContarAtivosPorTelefoneAsync("5511999990000"), Times.Once);
+        _tutorRepoMock.Verify(r => r.GetByTelefoneAsync("11999990000"), Times.Never);
         _tutorRepoMock.Verify(r => r.GetByTelefoneAsync("5511999990000"), Times.Once);
     }
 
@@ -702,6 +855,7 @@ public class TutorServiceTests
         // corromperia um número que não é brasileiro. Mordida: se a ordem fosse invertida (ou
         // só a tentativa com "55" existisse), este teste falha.
         var tutor = new Tutor { Id = 10, IdClinica = 42, NmTutor = "Estrangeiro", NrTelefone = "14155550100", StAtiva = true };
+        _tutorRepoMock.Setup(r => r.ContarAtivosPorTelefoneAsync("14155550100")).ReturnsAsync(1);
         _tutorRepoMock.Setup(r => r.GetByTelefoneAsync("14155550100")).ReturnsAsync(tutor);
         _tutorPetRepoMock.Setup(r => r.GetByTutorIdAsync(tutor.Id)).ReturnsAsync(new List<TutorPet>());
 
@@ -712,7 +866,65 @@ public class TutorServiceTests
         result.Should().NotBeNull();
         result!.IdTutor.Should().Be(10);
         _tutorRepoMock.Verify(r => r.GetByTelefoneAsync("14155550100"), Times.Once);
+        _tutorRepoMock.Verify(r => r.ContarAtivosPorTelefoneAsync("5514155550100"), Times.Never);
         _tutorRepoMock.Verify(r => r.GetByTelefoneAsync("5514155550100"), Times.Never);
+    }
+
+    [Fact]
+    public async Task BuscarContextoPorTelefoneAsync_ExataAmbigua_NaoTentaFallbackENaoDevolveOutroTutor()
+    {
+        // R3a (G2b fix wave 2, achado Minor): a busca EXATA ambígua (2+ ativos) já é
+        // "não encontrado" (TASK-79) — NÃO deve tentar a chave com prefixo "55", que poderia
+        // achar um TERCEIRO tutor completamente diferente do par ambíguo original (o achado
+        // exato da sonda do G2b: dois tutores em "11988880030" + um terceiro, distinto, em
+        // "5511988880030"). Mordida: se a decisão voltasse a depender só de
+        // GetByTelefoneAsync (que já colapsa ambíguo para null, indistinguível de "não
+        // encontrado"), este teste falharia (acharia o terceiro tutor via fallback).
+        var terceiroTutorSobPrefixo55 = new Tutor { Id = 12, IdClinica = 2, NmTutor = "Terceiro", NrTelefone = "5511988880030", StAtiva = true };
+        _tutorRepoMock.Setup(r => r.ContarAtivosPorTelefoneAsync("11988880030")).ReturnsAsync(2); // ambíguo
+        _tutorRepoMock.Setup(r => r.ContarAtivosPorTelefoneAsync("5511988880030")).ReturnsAsync(1);
+        _tutorRepoMock.Setup(r => r.GetByTelefoneAsync("5511988880030")).ReturnsAsync(terceiroTutorSobPrefixo55);
+
+        // Act
+        var result = await _sut.BuscarContextoPorTelefoneAsync("11988880030");
+
+        // Assert
+        result.Should().BeNull("a busca exata foi AMBÍGUA — o resultado final é 'não encontrado', sem tentar outra chave");
+        _tutorRepoMock.Verify(r => r.ContarAtivosPorTelefoneAsync("5511988880030"), Times.Never);
+        _tutorRepoMock.Verify(r => r.GetByTelefoneAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task BuscarContextoPorTelefoneAsync_FallbackAmbiguo_RetornaNull()
+    {
+        // R3a, controle complementar: exata deu 0 (tenta o fallback), mas o fallback TAMBÉM é
+        // ambíguo (2+) ⇒ TASK-79 se aplica ali também ⇒ resultado final é null.
+        _tutorRepoMock.Setup(r => r.ContarAtivosPorTelefoneAsync("11988880040")).ReturnsAsync(0);
+        _tutorRepoMock.Setup(r => r.ContarAtivosPorTelefoneAsync("5511988880040")).ReturnsAsync(2);
+
+        var result = await _sut.BuscarContextoPorTelefoneAsync("11988880040");
+
+        result.Should().BeNull();
+        _tutorRepoMock.Verify(r => r.GetByTelefoneAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task BuscarContextoPorTelefoneAsync_EntradaComDezDigitos_TambemTentaFallback()
+    {
+        // N3 (G2b fix wave 2, achado Minor): o comentário/relatório da fix wave 1 já alegava
+        // cobertura para "10 ou 11 dígitos", mas só havia teste para 11 — a re-G2 mutou o
+        // `== 10` e a suíte sobreviveu (nenhum teste exercitava esse ramo). Fixo nacional sem
+        // DDD-9 (10 dígitos, ex.: "1133334444") também precisa cair no fallback.
+        var tutor = new Tutor { Id = 13, IdClinica = 1, NmTutor = "FixoDezDigitos", NrTelefone = "551133334444", StAtiva = true };
+        _tutorRepoMock.Setup(r => r.ContarAtivosPorTelefoneAsync("1133334444")).ReturnsAsync(0);
+        _tutorRepoMock.Setup(r => r.ContarAtivosPorTelefoneAsync("551133334444")).ReturnsAsync(1);
+        _tutorRepoMock.Setup(r => r.GetByTelefoneAsync("551133334444")).ReturnsAsync(tutor);
+        _tutorPetRepoMock.Setup(r => r.GetByTutorIdAsync(tutor.Id)).ReturnsAsync(new List<TutorPet>());
+
+        var result = await _sut.BuscarContextoPorTelefoneAsync("1133334444");
+
+        result.Should().NotBeNull();
+        _tutorRepoMock.Verify(r => r.ContarAtivosPorTelefoneAsync("551133334444"), Times.Once);
     }
 
     [Fact]
