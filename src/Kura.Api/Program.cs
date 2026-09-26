@@ -130,6 +130,33 @@ var app = builder.Build();
 // POST /tutores) — medido pela G2 via sonda HTTP: 0 WARN depois de subir e responder /health,
 // 1 WARN só depois do 1º POST. Resolver aqui não tem efeito colateral (só lê IConfiguration e
 // loga) e não toca Oracle, então corre em qualquer ambiente, incluindo "Testing".
+//
+// N4 (G2b fix wave 2, achado Minor): NÃO existe teste automatizado de regressão para ESTA
+// linha — apagá-la (tratando como "código morto", já que `_ =` descarta o resultado) faz a
+// suíte inteira continuar verde. Duas abordagens foram tentadas e as duas mostraram
+// problemas reais, não apenas trabalho a mais:
+//   1. `ILoggerProvider` customizado registrado via `ConfigureLogging` numa
+//      `WebApplicationFactory` de teste — devolveu ZERO mensagens capturadas, inclusive para
+//      um `LogWarning` de controle disparado manualmente pelo MESMO `ILoggerFactory` do
+//      container. Causa: `builder.Host.UseSerilog(...)` acima usa o overload de 3 argumentos
+//      com `writeToProviders` no padrão (`false`) — Serilog vira o único provider efetivo do
+//      pipeline de `Microsoft.Extensions.Logging`, e qualquer outro `ILoggerProvider`
+//      registrado no container simplesmente não recebe nada. Mudar isso é decisão de
+//      produção (ligar `writeToProviders: true`), fora do escopo de um teste.
+//   2. Capturar `Console.Out` globalmente (o mesmo truque da sonda HTTP do G2b) — funciona
+//      para uma sonda TEMPORÁRIA rodada isolada (`--filter`), mas quebraria como teste
+//      PERMANENTE: ~17 outras classes de teste desta suíte constroem um `KuraApiFactory` SEM
+//      configurar `Convite:UrlBaseAppTutor` (`git grep -c "IClassFixture<KuraApiFactory>\|new
+//      KuraApiFactory" tests/Kura.IntegrationTests` — medido, não estimado), cada uma emitindo
+//      o MESMO texto de WARN na própria construção; o xUnit paraleliza collections diferentes
+//      por padrão (nenhum `xunit.runner.json` neste projeto desativa isso), então um teste que
+//      dependesse de contar "exatamente 1" ocorrência global seria estruturalmente instável —
+//      o número certo dependeria de quais outras classes o executor decidiu rodar em paralelo
+//      no mesmo instante, não do comportamento desta linha.
+// O comportamento HOJE está provado (não é afirmação sem medição): sonda HTTP do G2b
+// (`g2b-rec01.md`, R4) mediu 1 WARN sem nenhuma requisição, 0 com a config presente. Sem
+// mordida automatizada até uma das duas causas acima ser resolvida (mudar `writeToProviders`
+// na produção, ou aceitar suíte mais lenta desabilitando paralelismo entre collections).
 _ = app.Services.GetRequiredService<IGeradorLinkConvite>();
 
 // Validação de migrations pendentes — apenas AVISO, não aplica nada: o schema é
