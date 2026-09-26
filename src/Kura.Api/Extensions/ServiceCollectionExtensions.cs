@@ -64,6 +64,11 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ISoapDraftService, SoapDraftService>();
         services.AddScoped<IReceituarioPdfService, ReceituarioPdfService>();
 
+        // REC-01 (KURA_BACKLOG_RECEPCAO.md, A-8): Singleton de propósito — a config
+        // (Convite:UrlBaseAppTutor) é lida e o WARN de ausência é logado UMA VEZ no
+        // construtor, na partida do processo. Scoped repetiria o log a cada request.
+        services.AddSingleton<IGeradorLinkConvite, GeradorLinkConvite>();
+
         return services;
     }
 

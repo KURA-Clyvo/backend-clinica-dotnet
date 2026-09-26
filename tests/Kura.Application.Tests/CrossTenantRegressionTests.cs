@@ -55,7 +55,8 @@ public class CrossTenantRegressionTests
             new Mock<IInviteTutorRepository>().Object,
             new UnitOfWork(ctx),
             clinicaContextMock.Object,
-            new Mock<IGeradorUrlFotoPet>().Object);
+            new Mock<IGeradorUrlFotoPet>().Object,
+            new Mock<IGeradorLinkConvite>().Object);
     }
 
     // ---------- Tutor: isolamento cross-tenant ----------

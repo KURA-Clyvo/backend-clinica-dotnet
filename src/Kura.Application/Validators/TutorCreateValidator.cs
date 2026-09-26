@@ -2,9 +2,14 @@ namespace Kura.Application.Validators;
 
 using FluentValidation;
 using Kura.Application.DTOs.Tutor;
+using Kura.Domain.Tutores;
 
 public sealed class TutorCreateValidator : AbstractValidator<TutorCreateDto>
 {
+    private const string MensagemTelefoneInvalido =
+        "'NrTelefone' inválido — informe DDD + número (10 ou 11 dígitos), telefone já com DDI " +
+        "do Brasil (55 + DDD + número) ou telefone estrangeiro com '+' explícito.";
+
     public TutorCreateValidator()
     {
         RuleFor(x => x.NmTutor)
@@ -20,12 +25,34 @@ public sealed class TutorCreateValidator : AbstractValidator<TutorCreateDto>
             .NotEmpty()
             .MaximumLength(150);
 
-        // TASK-60: DS_TELEFONE é NOT NULL no Oracle (TUTOR.DS_TELEFONE, V1:91, migration
-        // imutável), mas de propósito sem NotEmpty() aqui — mesmo padrão da TASK-56
-        // (DsObservacao em ConsultaCreateValidator): quem satisfaz a restrição de armazenamento
-        // é o coalesce em TutorService.CreateAsync, não uma regra de negócio no validator.
+        // REC-01 (KURA_BACKLOG_RECEPCAO.md, A-12): telefone passou a ser OBRIGATÓRIO nesta
+        // rota — reverte de propósito o coalesce da TASK-60 (sentinela "Não informado"), que
+        // deixa de ser produzido por POST /api/v1/tutores (G0 item 6, consumidor 8). Também
+        // valida o FORMATO via NormalizadorTelefone — o mesmo helper que decide o valor
+        // persistido em TutorService, para nenhum telefone "quase válido" passar o 400 e
+        // ainda assim não casar com a busca da Luna.
         RuleFor(x => x.NrTelefone)
-            .MaximumLength(20);
+            .NotEmpty().WithMessage("'NrTelefone' é obrigatório.")
+            .MaximumLength(20)
+            .Must(t => NormalizadorTelefone.TentarNormalizar(t, out _))
+                .WithMessage(MensagemTelefoneInvalido)
+                .When(x => !string.IsNullOrWhiteSpace(x.NrTelefone));
+
+        // REC-01: DsWhatsapp é opcional ("mesmo número" quando ausente — G0 item 4), mas
+        // quando informado precisa se encaixar na mesma regra de formato.
+        RuleFor(x => x.DsWhatsapp)
+            .Must(w => NormalizadorTelefone.TentarNormalizar(w, out _))
+                .WithMessage("'DsWhatsapp' inválido — mesma regra de 'NrTelefone'.")
+                .When(x => !string.IsNullOrWhiteSpace(x.DsWhatsapp));
+
+        // REC-01 (A-9): aviso de privacidade passa a depender do que a recepção de fato
+        // informou ao tutor — TutorService.CreateAsync gravava StAvisoPrivacidade="S"
+        // incondicionalmente antes desta task.
+        RuleFor(x => x.StAvisoPrivacidadeInformado)
+            .Equal(true)
+            .WithMessage(
+                "É necessário confirmar que o aviso de privacidade foi informado ao tutor " +
+                "antes de cadastrá-lo.");
 
         RuleFor(x => x.DsCanalConvite)
             .Must(c => c is "WHATSAPP" or "EMAIL" or "SMS")

@@ -8,6 +8,7 @@ using Kura.Domain.Entities;
 using Kura.Domain.Exceptions;
 using Kura.Domain.Interfaces;
 using Kura.Domain.Storage;
+using Kura.Domain.Tutores;
 
 public sealed class TutorService : ITutorService
 {
@@ -19,6 +20,7 @@ public sealed class TutorService : ITutorService
     private readonly IUnitOfWork _uow;
     private readonly IClinicaContext _clinicaContext;
     private readonly IGeradorUrlFotoPet _geradorUrlFotoPet;
+    private readonly IGeradorLinkConvite _geradorLinkConvite;
 
     public TutorService(
         ITutorRepository repository,
@@ -28,7 +30,8 @@ public sealed class TutorService : ITutorService
         IInviteTutorRepository inviteRepository,
         IUnitOfWork uow,
         IClinicaContext clinicaContext,
-        IGeradorUrlFotoPet geradorUrlFotoPet)
+        IGeradorUrlFotoPet geradorUrlFotoPet,
+        IGeradorLinkConvite geradorLinkConvite)
     {
         _repository = repository;
         _tutorPetRepository = tutorPetRepository;
@@ -38,6 +41,7 @@ public sealed class TutorService : ITutorService
         _uow = uow;
         _clinicaContext = clinicaContext;
         _geradorUrlFotoPet = geradorUrlFotoPet;
+        _geradorLinkConvite = geradorLinkConvite;
     }
 
     public async Task<IEnumerable<TutorResponseDto>> SearchAsync(string? busca)
@@ -92,21 +96,39 @@ public sealed class TutorService : ITutorService
 
     public async Task<TutorComInviteResponseDto> CreateAsync(TutorCreateDto dto, long clinicaId)
     {
+        // REC-01 (KURA_BACKLOG_RECEPCAO.md, A-12): NrTelefone passou a ser obrigatório e
+        // validado por TutorCreateValidator (mesmo NormalizadorTelefone) — o sentinela "Não
+        // informado" da TASK-60 deixou de ser produzido por esta rota. Normalizamos de novo
+        // aqui (idempotente, ver NormalizadorTelefone) porque é este método — não o validator —
+        // quem decide o valor persistido; o throw abaixo é defesa em profundidade, inalcançável
+        // quando a requisição passou pelo pipeline de validação normal.
+        if (!NormalizadorTelefone.TentarNormalizar(dto.NrTelefone, out var telefoneArmazenado))
+            throw new RegraDeNegocioException("Telefone inválido.");
+
+        // A-9: DsWhatsapp ausente/vazio ⇒ "mesmo número" do telefone já normalizado (G0 item 4).
+        string whatsappArmazenado;
+        if (string.IsNullOrWhiteSpace(dto.DsWhatsapp))
+        {
+            whatsappArmazenado = telefoneArmazenado;
+        }
+        else if (!NormalizadorTelefone.TentarNormalizar(dto.DsWhatsapp, out whatsappArmazenado))
+        {
+            throw new RegraDeNegocioException("WhatsApp inválido.");
+        }
+
         var tutor = new Tutor
         {
             IdClinica = clinicaId,
             NmTutor = dto.NmTutor,
             NrCpf = dto.NrCpf,
             DsEmail = dto.DsEmail,
-            // TASK-60: TUTOR.DS_TELEFONE é NOT NULL (V1:91, migration imutável) e o Oracle trata
-            // VARCHAR2 vazio como NULL. TutorCreateValidator só valida NmTutor/NrCpf/DsEmail,
-            // nunca teve regra NotEmpty() para NrTelefone — sem este coalesce, um payload sem
-            // esse campo estoura ORA-01400 (500) no INSERT. Mesmo padrão da TASK-56: a restrição
-            // de armazenamento se resolve aqui, não como regra de negócio no validator.
-            NrTelefone = string.IsNullOrWhiteSpace(dto.NrTelefone)
-                ? "Não informado"
-                : dto.NrTelefone,
-            StAvisoPrivacidade = "S",
+            NrTelefone = telefoneArmazenado,
+            DsWhatsapp = NormalizadorTelefone.ParaE164(whatsappArmazenado),
+            // A-9: StAvisoPrivacidade agora DEPENDE do que a recepção de fato confirmou —
+            // TutorCreateValidator já exige StAvisoPrivacidadeInformado == true antes de
+            // chegar aqui (400 em caso contrário, nenhuma linha gravada), então este ramo
+            // "N" é defesa em profundidade, não caminho esperado em produção.
+            StAvisoPrivacidade = dto.StAvisoPrivacidadeInformado ? "S" : "N",
             DtAvisoPrivacidade = DateTime.UtcNow,
             DsVersaoAviso = "v1.0"
         };
@@ -122,7 +144,11 @@ public sealed class TutorService : ITutorService
         await _inviteRepository.AddAsync(invite);
 
         await _uow.CommitAsync();
-        return ToComInviteResponse(tutor, invite);
+
+        // A-8: idClinica vem do parâmetro `clinicaId` (JWT de quem está criando o tutor, ver
+        // TutoresController.Create) — NUNCA de um campo do corpo, que este DTO nem declara.
+        var link = _geradorLinkConvite.GerarLink(invite.NrToken, clinicaId);
+        return ToComInviteResponse(tutor, invite, link);
     }
 
     public async Task<TutorResponseDto> UpdateAsync(long id, TutorUpdateDto dto)
@@ -133,11 +159,25 @@ public sealed class TutorService : ITutorService
         tutor.NmTutor = dto.NmTutor;
         tutor.NrCpf = dto.NrCpf;
         tutor.DsEmail = dto.DsEmail;
-        // TASK-60: mesmo coalesce de CreateAsync — TutorUpdateValidator também nunca teve regra
-        // NotEmpty() para NrTelefone.
-        tutor.NrTelefone = string.IsNullOrWhiteSpace(dto.NrTelefone)
-            ? "Não informado"
-            : dto.NrTelefone;
+
+        // REC-01 (G0 item 4): o PUT NÃO exige telefone (recomendação do maestro — não quebrar
+        // edição parcial de tutor antigo sem telefone); TASK-60 continua coalescendo para o
+        // sentinela quando vazio. Quando o campo VEM preenchido, normaliza (idempotente) para o
+        // tutor editado casar com o formato que a Luna usa na busca — TutorUpdateValidator já
+        // bloqueia formato inválido (400) antes de chegar aqui; o throw é defesa em
+        // profundidade, nunca grava lixo mesmo se alcançado por outro caminho.
+        if (string.IsNullOrWhiteSpace(dto.NrTelefone))
+        {
+            tutor.NrTelefone = "Não informado";
+        }
+        else if (NormalizadorTelefone.TentarNormalizar(dto.NrTelefone, out var telefoneArmazenado))
+        {
+            tutor.NrTelefone = telefoneArmazenado;
+        }
+        else
+        {
+            throw new RegraDeNegocioException("Telefone inválido.");
+        }
 
         _repository.Update(tutor);
         await _uow.CommitAsync();
@@ -162,7 +202,17 @@ public sealed class TutorService : ITutorService
         // "mais de um tutor ativo com esse telefone, qualquer clínica — inclusive dois
         // da MESMA clínica" — o repositório já resolve a ambiguidade para null, ver
         // TutorRepository.
-        var tutor = await _repository.GetByTelefoneAsync(numero);
+        //
+        // REC-01 (G0 item 4): normaliza a ENTRADA antes de buscar, para número nacional e
+        // "55…" acharem o mesmo tutor (a busca do repositório é igualdade EXATA sobre
+        // DS_TELEFONE, que agora é sempre gravado normalizado). Formato não reconhecido ⇒
+        // busca pelo valor cru mesmo (fallback inofensivo: não vai casar com nada gravado
+        // depois desta task, então devolve "não encontrado" como já fazia antes de existir
+        // normalização nenhuma — nunca lança 400/422 para quem só está consultando).
+        var chaveBusca = NormalizadorTelefone.TentarNormalizar(numero, out var normalizado)
+            ? normalizado
+            : numero;
+        var tutor = await _repository.GetByTelefoneAsync(chaveBusca);
         if (tutor is null)
             return null;
 
@@ -202,7 +252,7 @@ public sealed class TutorService : ITutorService
         StAtiva = t.StAtiva
     };
 
-    private static TutorComInviteResponseDto ToComInviteResponse(Tutor t, InviteTutor i) => new()
+    private static TutorComInviteResponseDto ToComInviteResponse(Tutor t, InviteTutor i, string? dsLinkConvite) => new()
     {
         Id = t.Id,
         NmTutor = t.NmTutor,
@@ -217,6 +267,7 @@ public sealed class TutorService : ITutorService
             DtExpiracao = i.DtExpiracao,
             DsCanal = i.DsCanal,
             StUtilizado = i.StUtilizado
-        }
+        },
+        DsLinkConvite = dsLinkConvite
     };
 }

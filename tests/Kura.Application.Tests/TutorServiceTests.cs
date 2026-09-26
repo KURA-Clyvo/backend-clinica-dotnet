@@ -18,6 +18,7 @@ public class TutorServiceTests
     private readonly Mock<IUnitOfWork> _uowMock = new();
     private readonly Mock<IClinicaContext> _clinicaContextMock = new();
     private readonly Mock<IGeradorUrlFotoPet> _geradorUrlFotoPetMock = new();
+    private readonly Mock<IGeradorLinkConvite> _geradorLinkConviteMock = new();
     private readonly TutorService _sut;
 
     public TutorServiceTests()
@@ -35,15 +36,25 @@ public class TutorServiceTests
             _inviteRepoMock.Object,
             _uowMock.Object,
             _clinicaContextMock.Object,
-            _geradorUrlFotoPetMock.Object);
+            _geradorUrlFotoPetMock.Object,
+            _geradorLinkConviteMock.Object);
     }
 
-    private static TutorCreateDto ValidDto(string canal = "WHATSAPP", string nrTelefone = "11999999999") => new()
+    // REC-01 (KURA_BACKLOG_RECEPCAO.md, G0 item 6, consumidor 8): telefone nacional válido por
+    // padrão — não é mais opcional. StAvisoPrivacidadeInformado=true por padrão (o validator,
+    // não testado aqui, é quem bloqueia false/ausente com 400 — TutorCreateValidatorTests).
+    private static TutorCreateDto ValidDto(
+        string canal = "WHATSAPP",
+        string nrTelefone = "11999999999",
+        string? dsWhatsapp = null,
+        bool stAvisoPrivacidadeInformado = true) => new()
     {
         NmTutor = "Maria Silva",
         NrCpf = "12345678901",
         DsEmail = "maria@email.com",
         NrTelefone = nrTelefone,
+        DsWhatsapp = dsWhatsapp,
+        StAvisoPrivacidadeInformado = stAvisoPrivacidadeInformado,
         DsCanalConvite = canal
     };
 
@@ -159,49 +170,190 @@ public class TutorServiceTests
         _uowMock.Verify(u => u.CommitAsync(), Times.Never);
     }
 
+    // REC-01 (KURA_BACKLOG_RECEPCAO.md, A-12; G0 item 6, consumidor 8): esta task INVERTE de
+    // propósito o contrato da TASK-60 nesta rota — NrTelefone deixou de ser opcional.
+    // TutorCreateValidator bloqueia com 400 antes de chegar aqui (não testado nesta classe, ver
+    // TutorCreateValidatorTests); estes testes cobrem a DEFESA EM PROFUNDIDADE do service, que
+    // nunca deveria persistir "Não informado" nem telefone cru vindo desta rota outra vez.
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    public async Task CreateAsync_NrTelefoneVazioOuWhitespace_ColescaParaSentinela(string nrTelefoneBruto)
+    public async Task CreateAsync_NrTelefoneVazioOuWhitespace_LancaRegraDeNegocioENaoGravaNada(string nrTelefoneBruto)
     {
         // Arrange
-        // TASK-60: TUTOR.DS_TELEFONE é NOT NULL (V1:91, migration imutável) e o Oracle trata
-        // VARCHAR2 vazio como NULL — TutorCreateValidator só valida NmTutor/NrCpf/DsEmail, nunca
-        // teve regra para NrTelefone, então um payload sem esse campo passava reto pro INSERT e
-        // estourava ORA-01400 (500). Mesmo padrão da TASK-56: coalesce no service, não NotEmpty()
-        // no validator.
-        Tutor? tutorAdicionado = null;
-        _tutorRepoMock.Setup(r => r.AddAsync(It.IsAny<Tutor>()))
-            .Callback<Tutor>(t => tutorAdicionado = t)
-            .Returns(Task.CompletedTask);
-
         var dto = ValidDto(nrTelefone: nrTelefoneBruto);
 
         // Act
-        await _sut.CreateAsync(dto, 1L);
+        var act = async () => await _sut.CreateAsync(dto, 1L);
 
         // Assert
-        tutorAdicionado.Should().NotBeNull();
-        tutorAdicionado!.NrTelefone.Should().Be("Não informado");
+        await act.Should().ThrowAsync<RegraDeNegocioException>();
+        _tutorRepoMock.Verify(r => r.AddAsync(It.IsAny<Tutor>()), Times.Never);
+        _uowMock.Verify(u => u.CommitAsync(), Times.Never);
     }
 
     [Fact]
-    public async Task CreateAsync_NrTelefonePreenchido_NaoSobrescreveComSentinela()
+    public async Task CreateAsync_NrTelefoneNacionalComMascara_ArmazenaNormalizadoComDdiBrasil()
     {
-        // Arrange
+        // Arrange — mordida (b): se o helper devolvesse a entrada crua, este teste falharia
+        // ("(11) 98888-7777" ≠ "5511988887777").
         Tutor? tutorAdicionado = null;
         _tutorRepoMock.Setup(r => r.AddAsync(It.IsAny<Tutor>()))
             .Callback<Tutor>(t => tutorAdicionado = t)
             .Returns(Task.CompletedTask);
 
-        var dto = ValidDto(nrTelefone: "11988887777");
+        var dto = ValidDto(nrTelefone: "(11) 98888-7777");
 
         // Act
         await _sut.CreateAsync(dto, 1L);
 
         // Assert
         tutorAdicionado.Should().NotBeNull();
-        tutorAdicionado!.NrTelefone.Should().Be("11988887777");
+        tutorAdicionado!.NrTelefone.Should().Be("5511988887777");
+    }
+
+    [Fact]
+    public async Task CreateAsync_SemDsWhatsapp_GravaDsWhatsappComOMesmoNumeroNormalizado()
+    {
+        // Arrange — G0 item 4: "mesmo número" é o default quando DsWhatsapp está ausente.
+        Tutor? tutorAdicionado = null;
+        _tutorRepoMock.Setup(r => r.AddAsync(It.IsAny<Tutor>()))
+            .Callback<Tutor>(t => tutorAdicionado = t)
+            .Returns(Task.CompletedTask);
+
+        var dto = ValidDto(nrTelefone: "11988887777", dsWhatsapp: null);
+
+        // Act
+        await _sut.CreateAsync(dto, 1L);
+
+        // Assert
+        tutorAdicionado.Should().NotBeNull();
+        tutorAdicionado!.NrTelefone.Should().Be("5511988887777");
+        tutorAdicionado!.DsWhatsapp.Should().Be("+5511988887777");
+    }
+
+    [Fact]
+    public async Task CreateAsync_ComDsWhatsappDiferente_GravaOsDoisNormalizadosEmE164()
+    {
+        // Arrange — telefone de contato e WhatsApp podem ser números diferentes.
+        Tutor? tutorAdicionado = null;
+        _tutorRepoMock.Setup(r => r.AddAsync(It.IsAny<Tutor>()))
+            .Callback<Tutor>(t => tutorAdicionado = t)
+            .Returns(Task.CompletedTask);
+
+        var dto = ValidDto(nrTelefone: "1134567890", dsWhatsapp: "+55 11 98888-7777");
+
+        // Act
+        await _sut.CreateAsync(dto, 1L);
+
+        // Assert
+        tutorAdicionado.Should().NotBeNull();
+        tutorAdicionado!.NrTelefone.Should().Be("551134567890");
+        tutorAdicionado!.DsWhatsapp.Should().Be("+5511988887777");
+    }
+
+    // ── A-9: aviso de privacidade ────────────────────────────────────────────
+
+    [Fact]
+    public async Task CreateAsync_StAvisoPrivacidadeInformadoFalse_GravaN()
+    {
+        // Arrange — mordida (a) real é no VALIDATOR (TutorCreateValidatorTests): dto com
+        // StAvisoPrivacidadeInformado=false NUNCA alcança este método em produção (400 antes).
+        // Este teste documenta que, MESMO que alcance (chamada direta/defesa em profundidade),
+        // o service NUNCA promove "N" para "S" por conta própria — StAvisoPrivacidade passou a
+        // DEPENDER do campo do dto, em vez do "S" incondicional de antes desta task.
+        Tutor? tutorAdicionado = null;
+        _tutorRepoMock.Setup(r => r.AddAsync(It.IsAny<Tutor>()))
+            .Callback<Tutor>(t => tutorAdicionado = t)
+            .Returns(Task.CompletedTask);
+
+        var dto = ValidDto(stAvisoPrivacidadeInformado: false);
+
+        // Act
+        await _sut.CreateAsync(dto, 1L);
+
+        // Assert
+        tutorAdicionado.Should().NotBeNull();
+        tutorAdicionado!.StAvisoPrivacidade.Should().Be("N");
+    }
+
+    [Fact]
+    public async Task CreateAsync_StAvisoPrivacidadeInformadoTrue_GravaS()
+    {
+        Tutor? tutorAdicionado = null;
+        _tutorRepoMock.Setup(r => r.AddAsync(It.IsAny<Tutor>()))
+            .Callback<Tutor>(t => tutorAdicionado = t)
+            .Returns(Task.CompletedTask);
+
+        var dto = ValidDto(stAvisoPrivacidadeInformado: true);
+
+        await _sut.CreateAsync(dto, 1L);
+
+        tutorAdicionado.Should().NotBeNull();
+        tutorAdicionado!.StAvisoPrivacidade.Should().Be("S");
+    }
+
+    // ── A-8: link do convite ─────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CreateAsync_GeradorLinkConviteDevolveNull_DsLinkConviteVaiNullNaResposta()
+    {
+        // Arrange — config ausente/vazia (Convite:UrlBaseAppTutor): o processo sobe, o link
+        // sai null (REC-03 trata como "link não configurado", nunca QR vazio).
+        _geradorLinkConviteMock
+            .Setup(g => g.GerarLink(It.IsAny<Guid>(), It.IsAny<long>()))
+            .Returns((string?)null);
+
+        // Act
+        var result = await _sut.CreateAsync(ValidDto(), 1L);
+
+        // Assert
+        result.DsLinkConvite.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateAsync_GeradorLinkConviteConfigurado_UsaClinicaIdDoParametroENuncaOutro()
+    {
+        // Arrange — mordida (c): duas clínicas, o tutor SEMPRE nasce na clínica do parâmetro
+        // (JWT, via TutoresController.Create), nunca em outra. TutorCreateDto nem declara um
+        // campo de clínica — não há "corpo" de onde vazar um valor diferente.
+        long? clinicaRecebidaPeloGerador = null;
+        _geradorLinkConviteMock
+            .Setup(g => g.GerarLink(It.IsAny<Guid>(), It.IsAny<long>()))
+            .Callback<Guid, long>((_, idClinica) => clinicaRecebidaPeloGerador = idClinica)
+            .Returns("https://tutor.exemplo/register?token=abc&clinicaId=99");
+
+        // Act — clínica A
+        await _sut.CreateAsync(ValidDto(), 42L);
+        clinicaRecebidaPeloGerador.Should().Be(42L);
+
+        // Act — clínica B (mesmo dto, clinicaId DIFERENTE — nunca vaza a A)
+        clinicaRecebidaPeloGerador = null;
+        await _sut.CreateAsync(ValidDto(), 77L);
+        clinicaRecebidaPeloGerador.Should().Be(77L);
+    }
+
+    [Fact]
+    public async Task CreateAsync_ChamaGeradorLinkConviteComOTokenDoInviteRecemCriado()
+    {
+        // Arrange
+        InviteTutor? inviteCapturado = null;
+        _inviteRepoMock.Setup(r => r.AddAsync(It.IsAny<InviteTutor>()))
+            .Callback<InviteTutor>(i => inviteCapturado = i)
+            .Returns(Task.CompletedTask);
+
+        Guid? tokenRecebidoPeloGerador = null;
+        _geradorLinkConviteMock
+            .Setup(g => g.GerarLink(It.IsAny<Guid>(), It.IsAny<long>()))
+            .Callback<Guid, long>((token, _) => tokenRecebidoPeloGerador = token)
+            .Returns("https://tutor.exemplo/register?token=abc&clinicaId=1");
+
+        // Act
+        await _sut.CreateAsync(ValidDto(), 1L);
+
+        // Assert
+        tokenRecebidoPeloGerador.Should().NotBeNull();
+        tokenRecebidoPeloGerador.Should().Be(inviteCapturado!.NrToken);
     }
 
     [Theory]
