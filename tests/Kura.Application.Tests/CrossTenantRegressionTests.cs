@@ -53,6 +53,7 @@ public class CrossTenantRegressionTests
             new Mock<IRepository<Especie>>().Object,
             new Mock<IRepository<Raca>>().Object,
             new Mock<IInviteTutorRepository>().Object,
+            new Mock<IContaTutorRepository>().Object,
             new UnitOfWork(ctx),
             clinicaContextMock.Object,
             new Mock<IGeradorUrlFotoPet>().Object,

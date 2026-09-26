@@ -130,6 +130,7 @@ public class LgpdNaoVazamentoTests
             Mock.Of<IRepository<Especie>>(),
             Mock.Of<IRepository<Raca>>(),
             Mock.Of<IInviteTutorRepository>(),
+            Mock.Of<IContaTutorRepository>(),
             Mock.Of<IUnitOfWork>(),
             Mock.Of<IClinicaContext>(),
             Mock.Of<IGeradorUrlFotoPet>(),

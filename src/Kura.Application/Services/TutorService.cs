@@ -17,6 +17,7 @@ public sealed class TutorService : ITutorService
     private readonly IRepository<Especie> _especieRepository;
     private readonly IRepository<Raca> _racaRepository;
     private readonly IInviteTutorRepository _inviteRepository;
+    private readonly IContaTutorRepository _contaTutorRepository;
     private readonly IUnitOfWork _uow;
     private readonly IClinicaContext _clinicaContext;
     private readonly IGeradorUrlFotoPet _geradorUrlFotoPet;
@@ -28,6 +29,7 @@ public sealed class TutorService : ITutorService
         IRepository<Especie> especieRepository,
         IRepository<Raca> racaRepository,
         IInviteTutorRepository inviteRepository,
+        IContaTutorRepository contaTutorRepository,
         IUnitOfWork uow,
         IClinicaContext clinicaContext,
         IGeradorUrlFotoPet geradorUrlFotoPet,
@@ -38,6 +40,7 @@ public sealed class TutorService : ITutorService
         _especieRepository = especieRepository;
         _racaRepository = racaRepository;
         _inviteRepository = inviteRepository;
+        _contaTutorRepository = contaTutorRepository;
         _uow = uow;
         _clinicaContext = clinicaContext;
         _geradorUrlFotoPet = geradorUrlFotoPet;
@@ -238,6 +241,66 @@ public sealed class TutorService : ITutorService
         _repository.Update(tutor);
         await _uow.CommitAsync();
         return ToResponse(tutor);
+    }
+
+    public async Task<InviteTutorReemitidoResponseDto> ReemitirConviteAsync(long id, long clinicaId)
+    {
+        // A-7: escopo por clínica À MÃO, mesmo método já usado por GetByIdAsync/UpdateAsync —
+        // GetByIdAsync(id, idClinica) devolve null tanto para tutor inexistente quanto para
+        // tutor de OUTRA clínica (sem oráculo de existência: os dois casos são o MESMO 404), e
+        // o HasQueryFilter global de Tutor (StAtiva && tenant) já exclui tutor inativo da mesma
+        // consulta — três motivos de "não encontrado" convergindo no mesmo caminho, de
+        // propósito (Agendamento está na allowlist do filtro de tenant, não Tutor — Tutor JÁ
+        // está no filtro global desde a TASK-21).
+        var tutor = await _repository.GetByIdAsync(id, clinicaId)
+            ?? throw new EntidadeNaoEncontradaException("Tutor", id);
+
+        // Tutor que já concluiu o onboarding (CONTA_TUTOR é do Java, só leitura aqui —
+        // ReadOnlyTablesInterceptor) não tem por que reemitir convite.
+        if (await _contaTutorRepository.ExisteContaAsync(tutor.Id))
+            throw new TutorComContaExistenteException(tutor.Id);
+
+        // Cancela (soft delete) todo invite ainda ATIVO e NÃO UTILIZADO do tutor. O
+        // HasQueryFilter de InviteTutorConfiguration (e => e.StAtiva) já restringe este
+        // FindAsync aos convites ainda visíveis — um invite já cancelado por uma reemissão
+        // anterior não aparece aqui de novo. SoftDelete só marca StAtiva=false no
+        // ChangeTracker (Repository.cs:45-50); nada é persistido até o CommitAsync único
+        // abaixo, que também grava o invite novo — se o insert falhar, o SaveChanges inteiro
+        // falha e os SoftDelete não persistem (mesma transação implícita do EF Core).
+        var invitesAtivos = await _inviteRepository.FindAsync(
+            i => i.IdTutor == tutor.Id && !i.StUtilizado);
+        foreach (var antigo in invitesAtivos)
+            _inviteRepository.SoftDelete(antigo);
+
+        var novoInvite = new InviteTutor
+        {
+            IdTutor = tutor.Id,
+            Tutor = tutor,
+            NrToken = Guid.NewGuid(),
+            DtExpiracao = DateTime.UtcNow.AddDays(7),
+            // Mesmo canal default da entidade (DsCanal = "WHATSAPP") — REC-02 não recebe body,
+            // então não há canal explícito para propagar.
+        };
+        await _inviteRepository.AddAsync(novoInvite);
+
+        await _uow.CommitAsync();
+
+        // A-8: idClinica é o PARÂMETRO (JWT de quem está reemitindo, ver TutoresController),
+        // nunca um valor do corpo — mesma regra da CreateAsync (mordida (c) da REC-01).
+        var link = _geradorLinkConvite.GerarLink(novoInvite.NrToken, clinicaId);
+
+        return new InviteTutorReemitidoResponseDto
+        {
+            Invite = new InviteTutorResponseDto
+            {
+                Id = novoInvite.Id,
+                NrToken = novoInvite.NrToken,
+                DtExpiracao = novoInvite.DtExpiracao,
+                DsCanal = novoInvite.DsCanal,
+                StUtilizado = novoInvite.StUtilizado
+            },
+            DsLinkConvite = link
+        };
     }
 
     public async Task SoftDeleteAsync(long id)

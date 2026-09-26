@@ -15,6 +15,7 @@ public class TutorServiceTests
     private readonly Mock<IRepository<Especie>> _especieRepoMock = new();
     private readonly Mock<IRepository<Raca>> _racaRepoMock = new();
     private readonly Mock<IInviteTutorRepository> _inviteRepoMock = new();
+    private readonly Mock<IContaTutorRepository> _contaTutorRepoMock = new();
     private readonly Mock<IUnitOfWork> _uowMock = new();
     private readonly Mock<IClinicaContext> _clinicaContextMock = new();
     private readonly Mock<IGeradorUrlFotoPet> _geradorUrlFotoPetMock = new();
@@ -25,6 +26,7 @@ public class TutorServiceTests
     {
         _tutorRepoMock.Setup(r => r.AddAsync(It.IsAny<Tutor>())).Returns(Task.CompletedTask);
         _inviteRepoMock.Setup(r => r.AddAsync(It.IsAny<InviteTutor>())).Returns(Task.CompletedTask);
+        _contaTutorRepoMock.Setup(r => r.ExisteContaAsync(It.IsAny<long>())).ReturnsAsync(false);
         _uowMock.Setup(u => u.CommitAsync()).ReturnsAsync(1);
         _clinicaContextMock.Setup(c => c.IdClinica).Returns(1L);
 
@@ -34,6 +36,7 @@ public class TutorServiceTests
             _especieRepoMock.Object,
             _racaRepoMock.Object,
             _inviteRepoMock.Object,
+            _contaTutorRepoMock.Object,
             _uowMock.Object,
             _clinicaContextMock.Object,
             _geradorUrlFotoPetMock.Object,
@@ -168,6 +171,211 @@ public class TutorServiceTests
         // Assert
         await act.Should().ThrowAsync<EntidadeNaoEncontradaException>();
         _uowMock.Verify(u => u.CommitAsync(), Times.Never);
+    }
+
+    // REC-02 (KURA_BACKLOG_RECEPCAO.md): reemissão de convite. Reusa GeradorLinkConvite (não
+    // reimplementado) — o teste de "token nunca em log" já existe para esse componente
+    // compartilhado em TutorTokenNaoVazaNoLogTests.cs e cobre este fluxo por reuso, não por
+    // duplicação.
+
+    private static Tutor NovoTutor(long id, long idClinica) => new()
+    {
+        Id = id,
+        IdClinica = idClinica,
+        NmTutor = "Maria Silva",
+        NrCpf = "12345678901",
+        DsEmail = "maria@email.com",
+        NrTelefone = "5511999990000",
+        StAvisoPrivacidade = "S"
+    };
+
+    private static InviteTutor InviteAtivoNaoUtilizado(long id, long idTutor) => new()
+    {
+        Id = id,
+        IdTutor = idTutor,
+        NrToken = Guid.NewGuid(),
+        DtExpiracao = DateTime.UtcNow.AddDays(3),
+        DsCanal = "WHATSAPP",
+        StUtilizado = false
+    };
+
+    [Fact]
+    public async Task ReemitirConviteAsync_TutorNaoEncontrado_LancaEntidadeNaoEncontrada()
+    {
+        // Arrange
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(99L, 1L)).ReturnsAsync((Tutor?)null);
+
+        // Act
+        var act = async () => await _sut.ReemitirConviteAsync(99L, 1L);
+
+        // Assert
+        await act.Should().ThrowAsync<EntidadeNaoEncontradaException>();
+        _uowMock.Verify(u => u.CommitAsync(), Times.Never);
+        _inviteRepoMock.Verify(r => r.AddAsync(It.IsAny<InviteTutor>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ReemitirConviteAsync_TutorDeOutraClinica_MesmoNotFoundQueTutorInexistente()
+    {
+        // mordida (c) do aceite: duas clínicas, mesmo id de tutor. O repositório ESCOPADO
+        // (GetByIdAsync(id, idClinica)) devolve o tutor só para a clínica dona e null para a
+        // outra — exatamente como devolveria para um id que não existe em lugar nenhum. Sem
+        // oráculo: a mensagem de erro é a MESMA (mesmo template, mesmo id — o id já é
+        // informação que o próprio chamador colocou na URL, não uma pista nova).
+        const long idTutor = 42L;
+        var tutorDaClinicaA = NovoTutor(idTutor, idClinica: 1L);
+
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(idTutor, 1L)).ReturnsAsync(tutorDaClinicaA);
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(idTutor, 2L)).ReturnsAsync((Tutor?)null);
+        // Controle: se o código regredisse para a sobrecarga NÃO escopada por clínica (o bug
+        // clássico de vazamento cross-tenant — molde do achado da FD-17/DashboardService no
+        // CLAUDE.md), este stub faria a chamada da clínica errada devolver o tutor de
+        // qualquer forma, e a mordida abaixo pegaria isso (resultado 201 em vez de 404).
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(idTutor)).ReturnsAsync(tutorDaClinicaA);
+        _inviteRepoMock.Setup(r => r.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<InviteTutor, bool>>>()))
+            .ReturnsAsync([]);
+
+        // Act — clínica dona: sucesso.
+        var resultado = await _sut.ReemitirConviteAsync(idTutor, 1L);
+        resultado.Should().NotBeNull();
+
+        // Act — clínica errada: mesma exceção/mesmo template de mensagem de um id inexistente.
+        var act = async () => await _sut.ReemitirConviteAsync(idTutor, 2L);
+        var ex = await act.Should().ThrowAsync<EntidadeNaoEncontradaException>();
+        ex.Which.Message.Should().Be($"Tutor com id {idTutor} não encontrado.");
+    }
+
+    [Fact]
+    public async Task ReemitirConviteAsync_TutorJaTemConta_LancaConflitoENaoTocaInvites()
+    {
+        // mordida (b) do aceite: tutor com onboarding concluído (CONTA_TUTOR, tabela do Java,
+        // só leitura no .NET) ⇒ 409, reemitir não faz sentido.
+        const long idTutor = 7L;
+        var tutor = NovoTutor(idTutor, idClinica: 1L);
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(idTutor, 1L)).ReturnsAsync(tutor);
+        _contaTutorRepoMock.Setup(r => r.ExisteContaAsync(idTutor)).ReturnsAsync(true);
+
+        // Act
+        var act = async () => await _sut.ReemitirConviteAsync(idTutor, 1L);
+
+        // Assert
+        await act.Should().ThrowAsync<TutorComContaExistenteException>();
+        _uowMock.Verify(u => u.CommitAsync(), Times.Never);
+        _inviteRepoMock.Verify(r => r.SoftDelete(It.IsAny<InviteTutor>()), Times.Never);
+        _inviteRepoMock.Verify(r => r.AddAsync(It.IsAny<InviteTutor>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ReemitirConviteAsync_CancelaTodosOsConvitesAtivosNaoUtilizados()
+    {
+        // mordida (a) do aceite: sem cancelar os antigos, este teste falha.
+        const long idTutor = 15L;
+        var tutor = NovoTutor(idTutor, idClinica: 1L);
+        var inviteAntigo1 = InviteAtivoNaoUtilizado(101L, idTutor);
+        var inviteAntigo2 = InviteAtivoNaoUtilizado(102L, idTutor);
+
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(idTutor, 1L)).ReturnsAsync(tutor);
+        _contaTutorRepoMock.Setup(r => r.ExisteContaAsync(idTutor)).ReturnsAsync(false);
+        _inviteRepoMock
+            .Setup(r => r.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<InviteTutor, bool>>>()))
+            .ReturnsAsync([inviteAntigo1, inviteAntigo2]);
+
+        // Act
+        var resultado = await _sut.ReemitirConviteAsync(idTutor, 1L);
+
+        // Assert
+        _inviteRepoMock.Verify(r => r.SoftDelete(inviteAntigo1), Times.Once);
+        _inviteRepoMock.Verify(r => r.SoftDelete(inviteAntigo2), Times.Once);
+        _inviteRepoMock.Verify(r => r.AddAsync(It.IsAny<InviteTutor>()), Times.Once);
+        resultado.Invite.Should().NotBeNull();
+        resultado.Invite.NrToken.Should().NotBe(inviteAntigo1.NrToken);
+        resultado.Invite.NrToken.Should().NotBe(inviteAntigo2.NrToken);
+    }
+
+    [Fact]
+    public async Task ReemitirConviteAsync_FiltraApenasAtivosNaoUtilizados_PredicadoCorreto()
+    {
+        // Prova que o predicado passado a FindAsync de fato seleciona "deste tutor, não
+        // utilizado" — captura a expressão e aplica sobre dados de teste (incluindo um invite
+        // de OUTRO tutor e um já UTILIZADO, que não devem ser candidatos a cancelamento).
+        const long idTutor = 20L;
+        const long outroTutor = 21L;
+        var tutor = NovoTutor(idTutor, idClinica: 1L);
+        var inviteDesteTutorNaoUtilizado = InviteAtivoNaoUtilizado(201L, idTutor);
+        var inviteDesteTutorUtilizado = InviteAtivoNaoUtilizado(202L, idTutor);
+        inviteDesteTutorUtilizado.StUtilizado = true;
+        var inviteDeOutroTutor = InviteAtivoNaoUtilizado(203L, outroTutor);
+
+        System.Linq.Expressions.Expression<Func<InviteTutor, bool>>? predicadoCapturado = null;
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(idTutor, 1L)).ReturnsAsync(tutor);
+        _contaTutorRepoMock.Setup(r => r.ExisteContaAsync(idTutor)).ReturnsAsync(false);
+        _inviteRepoMock
+            .Setup(r => r.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<InviteTutor, bool>>>()))
+            .Callback<System.Linq.Expressions.Expression<Func<InviteTutor, bool>>>(p => predicadoCapturado = p)
+            .ReturnsAsync([inviteDesteTutorNaoUtilizado]);
+
+        // Act
+        await _sut.ReemitirConviteAsync(idTutor, 1L);
+
+        // Assert — o predicado real, aplicado a TODOS os candidatos (não só ao que o mock
+        // devolveu), tem que aceitar SÓ o invite deste tutor não utilizado.
+        predicadoCapturado.Should().NotBeNull();
+        var filtro = predicadoCapturado!.Compile();
+        filtro(inviteDesteTutorNaoUtilizado).Should().BeTrue();
+        filtro(inviteDesteTutorUtilizado).Should().BeFalse();
+        filtro(inviteDeOutroTutor).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ReemitirConviteAsync_MultiplosConvitesAntigos_UmUnicoCommit()
+    {
+        // Requisito 4 do brief: cancelar antigos + criar o novo numa transação só. Como
+        // SoftDelete/AddAsync só mutam o ChangeTracker (nunca chamam SaveChanges por si),
+        // provar "1 único CommitAsync" mesmo com N invites antigos prova que tudo cai no
+        // MESMO SaveChanges — se o insert falhar, nada persiste, nem os cancelamentos.
+        const long idTutor = 30L;
+        var tutor = NovoTutor(idTutor, idClinica: 1L);
+        var antigos = Enumerable.Range(1, 3)
+            .Select(i => InviteAtivoNaoUtilizado(300L + i, idTutor))
+            .ToList();
+
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(idTutor, 1L)).ReturnsAsync(tutor);
+        _contaTutorRepoMock.Setup(r => r.ExisteContaAsync(idTutor)).ReturnsAsync(false);
+        _inviteRepoMock
+            .Setup(r => r.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<InviteTutor, bool>>>()))
+            .ReturnsAsync(antigos);
+
+        // Act
+        await _sut.ReemitirConviteAsync(idTutor, 1L);
+
+        // Assert
+        _uowMock.Verify(u => u.CommitAsync(), Times.Once);
+    }
+
+    [Fact]
+    public async Task ReemitirConviteAsync_NovoTokenUsaClinicaIdDoParametroENuncaOutro()
+    {
+        // Mesma regra da CreateAsync (mordida (c) da REC-01): idClinica passado ao gerador de
+        // link é SEMPRE o parâmetro do método, nunca vaza entre chamadas.
+        const long idTutor = 55L;
+        var tutorClinicaA = NovoTutor(idTutor, idClinica: 42L);
+        var tutorClinicaB = NovoTutor(idTutor, idClinica: 77L);
+
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(idTutor, 42L)).ReturnsAsync(tutorClinicaA);
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(idTutor, 77L)).ReturnsAsync(tutorClinicaB);
+        _contaTutorRepoMock.Setup(r => r.ExisteContaAsync(idTutor)).ReturnsAsync(false);
+        _inviteRepoMock
+            .Setup(r => r.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<InviteTutor, bool>>>()))
+            .ReturnsAsync([]);
+
+        // Act
+        await _sut.ReemitirConviteAsync(idTutor, 42L);
+        await _sut.ReemitirConviteAsync(idTutor, 77L);
+
+        // Assert
+        _geradorLinkConviteMock.Verify(g => g.GerarLink(It.IsAny<Guid>(), 42L), Times.Once);
+        _geradorLinkConviteMock.Verify(g => g.GerarLink(It.IsAny<Guid>(), 77L), Times.Once);
+        _geradorLinkConviteMock.Verify(g => g.GerarLink(It.IsAny<Guid>(), idTutor), Times.Never);
     }
 
     // REC-01 (KURA_BACKLOG_RECEPCAO.md, A-12; G0 item 6, consumidor 8): esta task INVERTE de
