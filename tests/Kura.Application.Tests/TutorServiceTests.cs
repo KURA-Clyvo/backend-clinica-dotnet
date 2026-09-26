@@ -356,14 +356,14 @@ public class TutorServiceTests
         tokenRecebidoPeloGerador.Should().Be(inviteCapturado!.NrToken);
     }
 
+    // REC-01 (G0 item 4): recomendação do maestro — o PUT continua NÃO exigindo telefone (não
+    // quebrar edição parcial). TASK-60 (sentinela quando vazio) continua valendo sem mudança.
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
     public async Task UpdateAsync_NrTelefoneVazioOuWhitespace_ColescaParaSentinela(string nrTelefoneBruto)
     {
         // Arrange
-        // Mesmo gap de TutorCreateDto — TutorUpdateValidator também nunca teve regra para
-        // NrTelefone (só NmTutor/NrCpf/DsEmail).
         var tutorExistente = new Tutor { Id = 42L, NmTutor = "Maria", NrTelefone = "11900000000" };
         _tutorRepoMock.Setup(r => r.GetByIdAsync(42L)).ReturnsAsync(tutorExistente);
         _uowMock.Setup(u => u.CommitAsync()).ReturnsAsync(1);
@@ -385,9 +385,12 @@ public class TutorServiceTests
     }
 
     [Fact]
-    public async Task UpdateAsync_NrTelefonePreenchido_NaoSobrescreveComSentinela()
+    public async Task UpdateAsync_NrTelefonePreenchido_NormalizaComDdiBrasil()
     {
-        // Arrange
+        // Arrange — REC-01 (G0 item 4): antes desta task o PUT gravava o valor CRU
+        // ("11977776666"); agora normaliza igual ao POST, para o tutor editado casar com o
+        // formato que a Luna usa na busca. Mordida (b): helper devolvendo entrada crua faz
+        // este teste falhar ("11977776666" ≠ "5511977776666").
         var tutorExistente = new Tutor { Id = 42L, NmTutor = "Maria", NrTelefone = "11900000000" };
         _tutorRepoMock.Setup(r => r.GetByIdAsync(42L)).ReturnsAsync(tutorExistente);
         _uowMock.Setup(u => u.CommitAsync()).ReturnsAsync(1);
@@ -404,7 +407,57 @@ public class TutorServiceTests
         await _sut.UpdateAsync(42L, dto);
 
         // Assert
-        tutorExistente.NrTelefone.Should().Be("11977776666");
+        tutorExistente.NrTelefone.Should().Be("5511977776666");
+    }
+
+    [Fact]
+    public async Task UpdateAsync_NrTelefoneJaNormalizado_PermaneceIgual()
+    {
+        // Arrange — idempotência (o seed-demo-luna.sh reenvia DEMO_WHATSAPP já em "55…" pelo
+        // PUT, no ramo de idempotência do A1/LU-16): reenviar o valor já armazenado não deve
+        // prefixar "55" de novo.
+        var tutorExistente = new Tutor { Id = 42L, NmTutor = "Maria", NrTelefone = "5511900000000" };
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(42L)).ReturnsAsync(tutorExistente);
+        _uowMock.Setup(u => u.CommitAsync()).ReturnsAsync(1);
+
+        var dto = new TutorUpdateDto
+        {
+            NmTutor = "Maria",
+            NrCpf = "12345678901",
+            DsEmail = "maria@email.com",
+            NrTelefone = "5511900000000"
+        };
+
+        // Act
+        await _sut.UpdateAsync(42L, dto);
+
+        // Assert
+        tutorExistente.NrTelefone.Should().Be("5511900000000");
+    }
+
+    [Fact]
+    public async Task UpdateAsync_NrTelefoneFormatoInvalido_LancaRegraDeNegocioENaoAtualiza()
+    {
+        // Arrange — TutorUpdateValidator bloqueia com 400 antes de chegar aqui em produção;
+        // este teste cobre a defesa em profundidade do service ("nunca grava lixo").
+        var tutorExistente = new Tutor { Id = 42L, NmTutor = "Maria", NrTelefone = "5511900000000" };
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(42L)).ReturnsAsync(tutorExistente);
+
+        var dto = new TutorUpdateDto
+        {
+            NmTutor = "Maria",
+            NrCpf = "12345678901",
+            DsEmail = "maria@email.com",
+            NrTelefone = "123" // menos de 10 dígitos, sem "+"
+        };
+
+        // Act
+        var act = async () => await _sut.UpdateAsync(42L, dto);
+
+        // Assert
+        await act.Should().ThrowAsync<RegraDeNegocioException>();
+        _tutorRepoMock.Verify(r => r.Update(It.IsAny<Tutor>()), Times.Never);
+        _uowMock.Verify(u => u.CommitAsync(), Times.Never);
     }
 
     // ── BuscarContextoPorTelefoneAsync (TASK-67) ────────────────────────────
@@ -477,6 +530,26 @@ public class TutorServiceTests
         // Assert
         result.Should().NotBeNull();
         result!.Pets.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task BuscarContextoPorTelefoneAsync_NumeroNacional_NormalizaAntesDeBuscarNoRepositorio()
+    {
+        // Arrange — REC-01 (G0 item 4): normaliza a ENTRADA antes de buscar. A Luna sempre
+        // manda "55…" (Twilio), mas outro chamador (ou um teste manual) pode mandar nacional —
+        // os dois precisam achar o MESMO tutor. Mordida: sem esta normalização, o repositório
+        // é chamado com "11999990000" (nunca casa com o que está gravado, "5511999990000").
+        var tutor = new Tutor { Id = 9, IdClinica = 42, NmTutor = "Nacional", NrTelefone = "5511999990000", StAtiva = true };
+        _tutorRepoMock.Setup(r => r.GetByTelefoneAsync("5511999990000")).ReturnsAsync(tutor);
+        _tutorPetRepoMock.Setup(r => r.GetByTutorIdAsync(tutor.Id)).ReturnsAsync(new List<TutorPet>());
+
+        // Act
+        var result = await _sut.BuscarContextoPorTelefoneAsync("11999990000");
+
+        // Assert
+        result.Should().NotBeNull();
+        _tutorRepoMock.Verify(r => r.GetByTelefoneAsync("5511999990000"), Times.Once);
+        _tutorRepoMock.Verify(r => r.GetByTelefoneAsync("11999990000"), Times.Never);
     }
 
     [Fact]
