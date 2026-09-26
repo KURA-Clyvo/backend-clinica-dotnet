@@ -27,6 +27,9 @@ public sealed class TutorUpdateValidator : AbstractValidator<TutorUpdateDto>
         // POST (mesmo helper — NormalizadorTelefone), senão o tutor editado continuaria sem
         // casar com a busca da Luna. TASK-60 (coalesce para o sentinela "Não informado" em
         // TutorService.UpdateAsync quando vazio) continua valendo — sem mudança aqui.
+        // ApplyConditionTo.CurrentValidator: mesmo achado do TutorCreateValidator — sem o
+        // escopo explícito, .When() desativaria também .MaximumLength(20) quando vazio (aqui
+        // inofensivo, "" sempre passa MaximumLength; mantido por correção/consistência).
         RuleFor(x => x.NrTelefone)
             .MaximumLength(20)
             .Must(t => NormalizadorTelefone.TentarNormalizar(t, out _))
@@ -34,6 +37,6 @@ public sealed class TutorUpdateValidator : AbstractValidator<TutorUpdateDto>
                     "'NrTelefone' inválido — informe DDD + número (10 ou 11 dígitos), telefone " +
                     "já com DDI do Brasil (55 + DDD + número) ou telefone estrangeiro com '+' " +
                     "explícito.")
-                .When(x => !string.IsNullOrWhiteSpace(x.NrTelefone));
+                .When(x => !string.IsNullOrWhiteSpace(x.NrTelefone), ApplyConditionTo.CurrentValidator);
     }
 }
