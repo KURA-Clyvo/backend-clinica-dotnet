@@ -267,6 +267,10 @@ public sealed class TutorService : ITutorService
         // ChangeTracker (Repository.cs:45-50); nada é persistido até o CommitAsync único
         // abaixo, que também grava o invite novo — se o insert falhar, o SaveChanges inteiro
         // falha e os SoftDelete não persistem (mesma transação implícita do EF Core).
+        // ⚠️ Concorrência (G2 da REC-02, F5, aceito para o piloto): N reemissões simultâneas
+        // do mesmo tutor deixam N convites ativos — cada uma só cancela o que já estava
+        // commitado quando ela leu. Os tokens que sobram foram todos devolvidos ao mesmo
+        // chamador; o convite que já tinha sido entregue ao tutor é cancelado.
         var invitesAtivos = await _inviteRepository.FindAsync(
             i => i.IdTutor == tutor.Id && !i.StUtilizado);
         foreach (var antigo in invitesAtivos)

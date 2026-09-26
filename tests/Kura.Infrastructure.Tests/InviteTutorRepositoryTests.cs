@@ -77,12 +77,14 @@ public class InviteTutorRepositoryTests
     /// <summary>
     /// REC-02 (KURA_BACKLOG_RECEPCAO.md): prova, contra um KuraDbContext real (InMemory, não
     /// mock), que <c>SoftDelete</c> (que <c>TutorService.ReemitirConviteAsync</c> usa para
-    /// cancelar o invite antigo) faz o invite desaparecer de <c>GetByTokenAsync</c> — a MESMA
-    /// forma de "não encontrado" que <c>OnboardingService.registrarPorInvite</c> usaria no passo
-    /// 1 se o token não existisse (<c>InviteTutorRepository.findByNrToken</c> ...
-    /// <c>orElseThrow(NotFoundException)</c>). Aqui é <c>HasQueryFilter(e => e.StAtiva)</c>
-    /// (InviteTutorConfiguration.cs:64) quem produz o "desaparece" — não uma linha nova escrita
-    /// nesta task.
+    /// cancelar o invite antigo) faz o invite desaparecer de <c>GetByTokenAsync</c> do lado .NET.
+    /// Aqui é <c>HasQueryFilter(e => e.StAtiva)</c> (InviteTutorConfiguration.cs:64) quem produz o
+    /// "desaparece" — não uma linha nova escrita nesta task.
+    /// ⚠️ O lado Java NÃO trata o token cancelado como "não encontrado": ele acha a linha
+    /// (<c>ST_ATIVO='N'</c>) e devolve 409 "Convite cancelado." (<c>InviteTutor.isAtivo()</c>,
+    /// verificado antes de usado/expirado em <c>OnboardingService.java:75-77</c>, commit d1522ee,
+    /// conferido na G2 da REC-02 em 2026-09-26 —
+    /// <c>git -C ../backend-tutor-java show d1522ee:src/main/java/br/com/clyvo/kura/tutor/onboarding/application/OnboardingService.java | sed -n '75,77p'</c>).
     ///
     /// Complementa (não substitui) a ancoragem do lado Java em rec-02-report.md: aquela prova
     /// que <c>ST_ATIVO='N'</c> faz o Java jogar 409 "Convite cancelado." (via
