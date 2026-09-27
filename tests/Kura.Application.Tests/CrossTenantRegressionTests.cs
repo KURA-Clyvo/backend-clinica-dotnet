@@ -547,6 +547,53 @@ public class CrossTenantRegressionTests
         await act.Should().ThrowAsync<EntidadeNaoEncontradaException>();
     }
 
+    /// <summary>
+    /// Medido ao escrever esta suíte (mordida real, registrada no relatório da REC-10):
+    /// mutar <c>VeterinarioRepository.GetByIdAsync</c> para remover o predicado
+    /// <c>idClinica</c> do LINQ deixa o teste ACIMA (<see
+    /// cref="CriarAsync_VeterinarioDeOutraClinica_LancaEntidadeNaoEncontrada"/>) VERDE
+    /// mesmo assim -- porque o teste acima roda com <c>idClinicaFiltro: ClinicaA</c>, e o
+    /// <c>HasQueryFilter</c> GLOBAL de <c>Veterinario</c> (KuraDbContext) sozinho já
+    /// bloqueia o veterinário da Clínica B. O teste acima prova o comportamento ponta a
+    /// ponta; NÃO prova que o predicado EXPLÍCITO do repositório (defesa em profundidade,
+    /// A-7) faz alguma coisa. Mesma classe de achado que
+    /// <c>TriagemLunaListaTenantIsolationTests</c> já documentou para o join
+    /// TRIAGEM_LUNA→INTERACAO_CANAL (regra 13 do CLAUDE.md: "controle positivo" tem que
+    /// exercitar o MESMO predicado da medição).
+    ///
+    /// <para>Este teste roda com <c>idClinicaFiltro: null</c> (filtro global DESLIGADO --
+    /// simula, por exemplo, um consumidor futuro autenticado por API Key, sem JWT de
+    /// clínica, como os endpoints da Luna) enquanto o <see cref="IClinicaContext.IdClinica"/>
+    /// que o AgendaService usa continua fixo em <c>ClinicaA</c> -- isolando o predicado
+    /// explícito do repositório como ÚNICA proteção restante.</para>
+    /// </summary>
+    [Fact]
+    public async Task CriarAsync_SemFiltroGlobalAtivo_VeterinarioDeOutraClinica_AindaAssimBloqueadoPeloPredicadoExplicito()
+    {
+        // Arrange
+        var dbName = Guid.NewGuid().ToString();
+        await SeedDuasClinicasParaAgendamentoAsync(dbName);
+        // idClinicaFiltro: null -- desliga o HasQueryFilter global inteiro (mesma forma que
+        // os endpoints sem JWT de clínica o desligam em produção).
+        await using var ctxSemFiltroGlobal = CreateContext(dbName, idClinicaFiltro: null);
+        var sut = BuildAgendaServiceParaCriar(ctxSemFiltroGlobal, ClinicaA);
+
+        var dtoComVetDeOutraClinica = new AgendamentoCreateDto
+        {
+            IdTutor = 1,
+            IdPet = 1,
+            IdVeterinario = 2, // veterinário da Clínica B
+            DtAgendamento = DataDeTeste,
+            DsTipo = "CONSULTA"
+        };
+
+        // Act
+        var act = async () => await sut.CriarAsync(dtoComVetDeOutraClinica);
+
+        // Assert
+        await act.Should().ThrowAsync<EntidadeNaoEncontradaException>();
+    }
+
     [Fact]
     public async Task CriarAsync_TriagemDeOutraClinica_LancaEntidadeNaoEncontrada()
     {
