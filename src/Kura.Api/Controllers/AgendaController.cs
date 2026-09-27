@@ -80,4 +80,51 @@ public class AgendaController(IAgendaService agendaService) : ControllerBase
         var result = await agendaService.CriarAsync(dto);
         return StatusCode(StatusCodes.Status201Created, result);
     }
+
+    /// <summary>
+    /// REC-11 — registra a chegada do paciente (check-in). Só a partir de <c>AGENDADO</c> ou
+    /// <c>CONFIRMADO</c>. Idempotente: uma 2ª chamada devolve o estado atual sem sobrescrever o
+    /// horário nem incrementar <c>NrVersion</c>. Horário sempre do relógio da clínica (hora local
+    /// de SP), nunca do cliente.
+    /// </summary>
+    /// <param name="id">Identificador do agendamento.</param>
+    /// <param name="dto">Versão atual do agendamento (lock otimista).</param>
+    /// <returns>Agendamento com <c>DtCheckin</c> e <c>DsEtapaRecepcao</c> atualizados.</returns>
+    /// <response code="200">Check-in registrado (ou já existente — idempotente).</response>
+    /// <response code="404">Agendamento não encontrado (ou de outra clínica — mesma resposta).</response>
+    /// <response code="409">Conflito de concorrência — <c>NrVersion</c> desatualizado.</response>
+    /// <response code="422">Status atual não permite check-in.</response>
+    [HttpPost("~/api/v1/agendamentos/{id:long}/checkin")]
+    [ProducesResponseType(typeof(AgendamentoItemDto), 200)]
+    [ProducesResponseType(typeof(ProblemDetails), 404)]
+    [ProducesResponseType(typeof(ProblemDetails), 409)]
+    [ProducesResponseType(typeof(ProblemDetails), 422)]
+    public async Task<IActionResult> Checkin(long id, [FromBody] RegistrarEventoRecepcaoDto dto)
+    {
+        var result = await agendaService.CheckinAsync(id, dto);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// REC-11 — registra o início do atendimento. Permitido sem check-in prévio (walk-in que
+    /// entra direto) — nunca preenche <c>DtCheckin</c> como efeito colateral. Mesmo contrato de
+    /// lock/idempotência do check-in.
+    /// </summary>
+    /// <param name="id">Identificador do agendamento.</param>
+    /// <param name="dto">Versão atual do agendamento (lock otimista).</param>
+    /// <returns>Agendamento com <c>DtInicioAtendimento</c> e <c>DsEtapaRecepcao</c> atualizados.</returns>
+    /// <response code="200">Início registrado (ou já existente — idempotente).</response>
+    /// <response code="404">Agendamento não encontrado (ou de outra clínica — mesma resposta).</response>
+    /// <response code="409">Conflito de concorrência — <c>NrVersion</c> desatualizado.</response>
+    /// <response code="422">Status atual não permite iniciar atendimento.</response>
+    [HttpPost("~/api/v1/agendamentos/{id:long}/inicio-atendimento")]
+    [ProducesResponseType(typeof(AgendamentoItemDto), 200)]
+    [ProducesResponseType(typeof(ProblemDetails), 404)]
+    [ProducesResponseType(typeof(ProblemDetails), 409)]
+    [ProducesResponseType(typeof(ProblemDetails), 422)]
+    public async Task<IActionResult> IniciarAtendimento(long id, [FromBody] RegistrarEventoRecepcaoDto dto)
+    {
+        var result = await agendaService.IniciarAtendimentoAsync(id, dto);
+        return Ok(result);
+    }
 }

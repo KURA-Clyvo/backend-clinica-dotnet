@@ -127,6 +127,21 @@ public sealed class AgendaService : IAgendaService
             .Select(par => par.Key)
             .ToHashSet(StringComparer.Ordinal);
 
+    /// <summary>
+    /// REC-11 — status a partir dos quais check-in e início de atendimento são aceitos.
+    ///
+    /// <para>
+    /// 🔴 <b>Check-in e início NÃO transicionam <c>ST_STATUS</c> (A-2).</b> Eles escrevem
+    /// <c>DT_CHECKIN</c>/<c>DT_INICIO_ATENDIMENTO</c>, colunas irmãs, nunca a máquina de estados
+    /// de <see cref="TransicoesPermitidas"/> — por isso este é um segundo conjunto, não um
+    /// reaproveitamento de <see cref="StatusFinais"/>/<c>TransicoesPermitidas</c>. Um agendamento
+    /// segue <c>AGENDADO</c> (ou <c>CONFIRMADO</c>) depois do check-in; é <c>DsEtapaRecepcao</c>
+    /// (<see cref="CalcularEtapaRecepcao"/>) quem muda, lendo os timestamps.
+    /// </para>
+    /// </summary>
+    private static readonly IReadOnlySet<string> StatusElegiveisParaEventoRecepcao =
+        new HashSet<string>(StringComparer.Ordinal) { "AGENDADO", "CONFIRMADO" };
+
     public AgendaService(
         IAgendamentoReadRepository readRepository,
         IClinicaContext clinicaContext,
@@ -203,6 +218,25 @@ public sealed class AgendaService : IAgendaService
                 $"Transição de status inválida para o agendamento {id}: "
                 + $"{agendamento.StStatus} -> {dto.DsStatus}. A partir de {agendamento.StStatus} "
                 + $"só é possível ir para: {string.Join(", ", destinosPermitidos)}.");
+
+        // REC-11 — fecha a lacuna declarada acima (linhas 83-90 da doc de TransicoesPermitidas):
+        // falta só existe DEPOIS do horário marcado e NUNCA depois de check-in (quem chegou não
+        // faltou). Guarda de negócio, então vem ANTES do conflito de versão — mesma ordem já
+        // estabelecida para "transição inválida precede conflito de versão".
+        if (dto.DsStatus == "NAO_COMPARECEU")
+        {
+            if (agendamento.DtCheckin.HasValue)
+                throw new RegraDeNegocioException(
+                    $"Agendamento {id} já teve check-in registrado em "
+                    + $"{agendamento.DtCheckin:yyyy-MM-dd HH:mm} e não pode ser marcado como falta.");
+
+            var agoraFalta = _relogioClinica.Agora();
+            if (agoraFalta < agendamento.DtAgendamento)
+                throw new RegraDeNegocioException(
+                    $"Agendamento {id} está marcado para {agendamento.DtAgendamento:yyyy-MM-dd HH:mm} "
+                    + "e ainda não chegou a esse horário — falta só pode ser registrada depois do "
+                    + "horário marcado.");
+        }
 
         if (dto.NrVersion != agendamento.NrVersion)
             throw new ConflitoConcorrenciaException("Agendamento", id);
@@ -343,6 +377,74 @@ public sealed class AgendaService : IAgendaService
         // INSERT (A-4) -- ver AgendamentoConfiguration e AgendamentoPkStrategyTests. O
         // provider InMemory usado nos testes gera seu próprio Id (não zero) após o
         // CommitAsync acima; contra Oracle real, quem gera é a sequence (G4).
+        return ToItemDto(agendamento);
+    }
+
+    /// <summary>
+    /// REC-11 — <c>POST /api/v1/agendamentos/{id}/checkin</c>. Registra a chegada do paciente
+    /// (<c>DT_CHECKIN</c>), nunca muda <c>ST_STATUS</c> (A-2).
+    ///
+    /// <para><b>Ordem das guardas</b> (mesmo raciocínio de <see cref="AtualizarStatusAsync"/>:
+    /// guarda de negócio antes de conflito de versão): (1) 404 se não achar, escopado por
+    /// <see cref="IClinicaContext"/> (A-7); (2) status fora de
+    /// <see cref="StatusElegiveisParaEventoRecepcao"/> ⇒ 422; (3) IDEMPOTÊNCIA — já tem
+    /// <c>DT_CHECKIN</c> ⇒ devolve o estado atual, sem checar versão (não há escrita, OCC não se
+    /// aplica); (4) versão divergente ⇒ 409; (5) grava
+    /// <see cref="IRelogioClinica.Agora"/>, incrementa <c>NrVersion</c>, commita.</para>
+    /// </summary>
+    public async Task<AgendamentoItemDto> CheckinAsync(long id, RegistrarEventoRecepcaoDto dto)
+    {
+        var agendamento = await _agendamentoRepository.GetByIdAsync(id, _clinicaContext.IdClinica)
+            ?? throw new EntidadeNaoEncontradaException("Agendamento", id);
+
+        if (agendamento.StStatus is null || !StatusElegiveisParaEventoRecepcao.Contains(agendamento.StStatus))
+            throw new RegraDeNegocioException(
+                $"Agendamento {id} está com status '{agendamento.StStatus ?? "null"}' e não pode "
+                + "receber check-in. Só é possível fazer check-in a partir de AGENDADO ou "
+                + "CONFIRMADO.");
+
+        if (agendamento.DtCheckin.HasValue)
+            return ToItemDto(agendamento);
+
+        if (dto.NrVersion != agendamento.NrVersion)
+            throw new ConflitoConcorrenciaException("Agendamento", id);
+
+        agendamento.DtCheckin = _relogioClinica.Agora();
+        agendamento.NrVersion = dto.NrVersion + 1;
+
+        _agendamentoRepository.Update(agendamento);
+        await _uow.CommitAsync();
+        return ToItemDto(agendamento);
+    }
+
+    /// <summary>
+    /// REC-11 — <c>POST /api/v1/agendamentos/{id}/inicio-atendimento</c>. Registra o início do
+    /// atendimento (<c>DT_INICIO_ATENDIMENTO</c>), permitido SEM check-in prévio (walk-in que
+    /// entra direto) — este método nunca toca <c>DT_CHECKIN</c>. Mesma ordem de guardas de
+    /// <see cref="CheckinAsync"/>.
+    /// </summary>
+    public async Task<AgendamentoItemDto> IniciarAtendimentoAsync(long id, RegistrarEventoRecepcaoDto dto)
+    {
+        var agendamento = await _agendamentoRepository.GetByIdAsync(id, _clinicaContext.IdClinica)
+            ?? throw new EntidadeNaoEncontradaException("Agendamento", id);
+
+        if (agendamento.StStatus is null || !StatusElegiveisParaEventoRecepcao.Contains(agendamento.StStatus))
+            throw new RegraDeNegocioException(
+                $"Agendamento {id} está com status '{agendamento.StStatus ?? "null"}' e não pode "
+                + "iniciar atendimento. Só é possível iniciar a partir de AGENDADO ou CONFIRMADO.");
+
+        if (agendamento.DtInicioAtendimento.HasValue)
+            return ToItemDto(agendamento);
+
+        if (dto.NrVersion != agendamento.NrVersion)
+            throw new ConflitoConcorrenciaException("Agendamento", id);
+
+        // NÃO inventa DT_CHECKIN -- walk-in que entra direto continua com DtCheckin null.
+        agendamento.DtInicioAtendimento = _relogioClinica.Agora();
+        agendamento.NrVersion = dto.NrVersion + 1;
+
+        _agendamentoRepository.Update(agendamento);
+        await _uow.CommitAsync();
         return ToItemDto(agendamento);
     }
 
