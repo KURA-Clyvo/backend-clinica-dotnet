@@ -17,6 +17,11 @@ public class AgendaServiceTests
     private readonly Mock<IUnitOfWork> _uowMock = new();
     private readonly Mock<IGeradorUrlFotoPet> _geradorUrlFotoPetMock = new();
     private readonly Mock<ILogger<AgendaService>> _loggerMock = new();
+    private readonly Mock<ITutorRepository> _tutorRepoMock = new();
+    private readonly Mock<IPetRepository> _petRepoMock = new();
+    private readonly Mock<IVeterinarioRepository> _veterinarioRepoMock = new();
+    private readonly Mock<ITriagemLunaRepository> _triagemLunaRepoMock = new();
+    private readonly Mock<IRelogioClinica> _relogioClinicaMock = new();
     private readonly AgendaService _sut;
 
     public AgendaServiceTests()
@@ -30,7 +35,12 @@ public class AgendaServiceTests
             _agendamentoRepoMock.Object,
             _uowMock.Object,
             _geradorUrlFotoPetMock.Object,
-            _loggerMock.Object);
+            _loggerMock.Object,
+            _tutorRepoMock.Object,
+            _petRepoMock.Object,
+            _veterinarioRepoMock.Object,
+            _triagemLunaRepoMock.Object,
+            _relogioClinicaMock.Object);
     }
 
     private static DateTime Inicio => new(2026, 5, 6);
