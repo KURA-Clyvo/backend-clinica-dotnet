@@ -28,6 +28,12 @@ public class AgendaReadRepository(KuraDbContext context) : IAgendamentoReadRepos
             .Include(a => a.Pet)
             .Include(a => a.Tutor)
             .Include(a => a.Veterinario)
+            // REC-09/A-7: ID_TRIAGEM_ORIGEM é FK opcional -> LEFT JOIN. O HasQueryFilter
+            // de TriagemLuna (KuraDbContext.ApplyTenantFilters) continua ativo sobre a
+            // navegação: triagem de outra clínica não passa no filtro e a propriedade
+            // fica null (não derruba a linha de Agendamento) — provado em
+            // AgendaReadRepositoryTests com duas clínicas.
+            .Include(a => a.TriagemOrigem)
             .Where(a => a.IdClinica == idClinica
                      && a.DtAgendamento >= dataInicio.Date
                      && a.DtAgendamento < dataFim.Date.AddDays(1));

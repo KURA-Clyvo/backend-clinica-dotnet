@@ -21,13 +21,13 @@ using Moq;
 /// </summary>
 public sealed class AgendaReadRepositoryTests
 {
-    private static KuraDbContext CreateContext()
+    private static KuraDbContext CreateContext(string? dbName = null, long? idClinicaFiltro = null)
     {
         var clinicaContext = new Mock<IClinicaContext>();
-        clinicaContext.Setup(x => x.IdClinicaFiltro).Returns((long?)null);
+        clinicaContext.Setup(x => x.IdClinicaFiltro).Returns(idClinicaFiltro);
 
         var options = new DbContextOptionsBuilder<KuraDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .UseInMemoryDatabase(dbName ?? Guid.NewGuid().ToString())
             .Options;
 
         return new KuraDbContext(options, clinicaContext.Object);
@@ -103,5 +103,158 @@ public sealed class AgendaReadRepositoryTests
         // Assert
         resultado.Should().ContainSingle();
         resultado[0].NmPaciente.Should().Be("Clinica1");
+    }
+
+    /// <summary>
+    /// REC-09 aceite (c) — colunas V23 (DT_CHECKIN, DS_ORIGEM, DS_RESPOSTA_CONFIRMACAO, mais
+    /// DT_INICIO_ATENDIMENTO/DT_LEMBRETE_CONFIRMACAO/DT_RESPOSTA_CONFIRMACAO/ID_TRIAGEM_ORIGEM)
+    /// mapeadas do banco. O round-trip usa DOIS DbContext distintos sobre o MESMO nome de banco
+    /// InMemory (seed → dispose → reabre → lê): se não passar por um novo context, o teste
+    /// devolveria a mesma instância rastreada e passaria mesmo com a coluna nunca configurada.
+    /// </summary>
+    [Fact]
+    public async Task GetByIntervaloAsync_MapeiaColunasV23_AposRoundTripNoBanco()
+    {
+        // Arrange
+        var dbName = Guid.NewGuid().ToString();
+        var dia = new DateTime(2026, 9, 26);
+
+        await using (var seedCtx = CreateContext(dbName))
+        {
+            seedCtx.Agendamentos.Add(new Agendamento
+            {
+                Id = 1,
+                IdClinica = 1,
+                NmPaciente = "V23",
+                DtAgendamento = dia.AddHours(9),
+                StStatus = "AGENDADO",
+                DsOrigem = "RECEPCAO",
+                DtCheckin = dia.AddHours(8).AddMinutes(55),
+                DtInicioAtendimento = dia.AddHours(9).AddMinutes(2),
+                DtLembreteConfirmacao = dia.AddDays(-1).AddHours(18),
+                DsRespostaConfirmacao = "SIM",
+                DtRespostaConfirmacao = dia.AddDays(-1).AddHours(18).AddMinutes(3)
+            });
+            await seedCtx.SaveChangesAsync();
+        }
+
+        await using var readCtx = CreateContext(dbName);
+        var repository = new AgendaReadRepository(readCtx);
+
+        // Act
+        var resultado = (await repository.GetByIntervaloAsync(1, dia, dia, null)).ToList();
+
+        // Assert
+        resultado.Should().ContainSingle();
+        var item = resultado[0];
+        item.DsOrigem.Should().Be("RECEPCAO");
+        item.DtCheckin.Should().Be(dia.AddHours(8).AddMinutes(55));
+        item.DtInicioAtendimento.Should().Be(dia.AddHours(9).AddMinutes(2));
+        item.DtLembreteConfirmacao.Should().Be(dia.AddDays(-1).AddHours(18));
+        item.DsRespostaConfirmacao.Should().Be("SIM");
+        item.DtRespostaConfirmacao.Should().Be(dia.AddDays(-1).AddHours(18).AddMinutes(3));
+    }
+
+    /// <summary>
+    /// REC-09 aceite (b) — agendamento da clínica A com ID_TRIAGEM_ORIGEM apontando para uma
+    /// TRIAGEM_LUNA da clínica B: a navegação TriagemOrigem tem que ficar NULA (não a triagem
+    /// de B), porque o HasQueryFilter de TriagemLuna (KuraDbContext.ApplyTenantFilters) continua
+    /// ativo sobre o Include — ID_TRIAGEM_ORIGEM é FK opcional, então o EF gera LEFT JOIN e a
+    /// linha de Agendamento não é derrubada (ao contrário do caso de FK obrigatória documentado
+    /// no CLAUDE.md sobre TimelineRepository). idClinicaFiltro=A imita o JWT real do
+    /// AgendaController ([Authorize]): IdClinica e IdClinicaFiltro vêm da mesma claim
+    /// (ClinicaContext.cs:17,25).
+    /// </summary>
+    [Fact]
+    public async Task GetByIntervaloAsync_TriagemOrigemDeOutraClinica_NavegacaoFicaNula()
+    {
+        // Arrange
+        const long clinicaA = 1;
+        const long clinicaB = 2;
+        var dbName = Guid.NewGuid().ToString();
+        var dia = new DateTime(2026, 9, 26);
+
+        await using (var seedCtx = CreateContext(dbName))
+        {
+            seedCtx.TriagensLuna.Add(new TriagemLuna
+            {
+                Id = 900,
+                IdClinica = clinicaB,
+                DsNivelUrgencia = "ALTA",
+                DsDescricao = "Triagem da clinica B",
+                DtTriagem = dia.AddDays(-1)
+            });
+            seedCtx.Agendamentos.Add(new Agendamento
+            {
+                Id = 1,
+                IdClinica = clinicaA,
+                NmPaciente = "AgendamentoA",
+                DtAgendamento = dia.AddHours(9),
+                StStatus = "AGENDADO",
+                DsOrigem = "TRIAGEM_LUNA",
+                IdTriagemOrigem = 900
+            });
+            await seedCtx.SaveChangesAsync();
+        }
+
+        await using var readCtx = CreateContext(dbName, idClinicaFiltro: clinicaA);
+        var repository = new AgendaReadRepository(readCtx);
+
+        // Act
+        var resultado = (await repository.GetByIntervaloAsync(clinicaA, dia, dia, null)).ToList();
+
+        // Assert
+        resultado.Should().ContainSingle();
+        resultado[0].IdTriagemOrigem.Should().Be(900, "a FK crua não vaza nada por si só");
+        resultado[0].TriagemOrigem.Should().BeNull(
+            "a triagem referenciada é da clínica B; o query filter de TriagemLuna tem que barrar a navegação");
+    }
+
+    /// <summary>
+    /// Contraste do teste acima: MESMA clínica na FK e no filtro -- a navegação deve carregar
+    /// normalmente. Sem este caso, o teste anterior não provaria isolamento (só provaria que o
+    /// Include nunca funciona).
+    /// </summary>
+    [Fact]
+    public async Task GetByIntervaloAsync_TriagemOrigemDaMesmaClinica_NavegacaoCarrega()
+    {
+        // Arrange
+        const long clinicaA = 1;
+        var dbName = Guid.NewGuid().ToString();
+        var dia = new DateTime(2026, 9, 26);
+
+        await using (var seedCtx = CreateContext(dbName))
+        {
+            seedCtx.TriagensLuna.Add(new TriagemLuna
+            {
+                Id = 901,
+                IdClinica = clinicaA,
+                DsNivelUrgencia = "MEDIA",
+                DsDescricao = "Triagem da clinica A",
+                DtTriagem = dia.AddDays(-1)
+            });
+            seedCtx.Agendamentos.Add(new Agendamento
+            {
+                Id = 2,
+                IdClinica = clinicaA,
+                NmPaciente = "AgendamentoA",
+                DtAgendamento = dia.AddHours(9),
+                StStatus = "AGENDADO",
+                DsOrigem = "TRIAGEM_LUNA",
+                IdTriagemOrigem = 901
+            });
+            await seedCtx.SaveChangesAsync();
+        }
+
+        await using var readCtx = CreateContext(dbName, idClinicaFiltro: clinicaA);
+        var repository = new AgendaReadRepository(readCtx);
+
+        // Act
+        var resultado = (await repository.GetByIntervaloAsync(clinicaA, dia, dia, null)).ToList();
+
+        // Assert
+        resultado.Should().ContainSingle();
+        resultado[0].TriagemOrigem.Should().NotBeNull();
+        resultado[0].TriagemOrigem!.DsNivelUrgencia.Should().Be("MEDIA");
     }
 }

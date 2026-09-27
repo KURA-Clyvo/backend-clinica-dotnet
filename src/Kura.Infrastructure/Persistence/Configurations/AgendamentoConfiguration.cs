@@ -56,9 +56,13 @@ public class AgendamentoConfiguration : IEntityTypeConfiguration<Agendamento>
             .HasMaxLength(50)
             .IsRequired(false);
 
+        // M1 (REC-09/A-1): a coluna real no Oracle é VARCHAR2(20) desde a V1 — o EF
+        // declarava 100, sem nunca ter escrito nela (o .NET nunca produzia DS_ORIGEM
+        // antes da REC-10). CHECK novo da V23 (backend-tutor-java d1522ee):
+        // DS_ORIGEM IN ('PORTAL','RECEPCAO','TRIAGEM_LUNA').
         builder.Property(e => e.DsOrigem)
             .HasColumnName("DS_ORIGEM")
-            .HasMaxLength(100)
+            .HasMaxLength(20)
             .IsRequired(false);
 
         builder.Property(e => e.NrVersion)
@@ -114,6 +118,32 @@ public class AgendamentoConfiguration : IEntityTypeConfiguration<Agendamento>
             .HasColumnName("DT_FIM_SESSAO")
             .IsRequired(false);
 
+        // Flyway V23 columns (backend-tutor-java d1522ee, REC-07) — recepção.
+        builder.Property(e => e.DtCheckin)
+            .HasColumnName("DT_CHECKIN")
+            .IsRequired(false);
+
+        builder.Property(e => e.DtInicioAtendimento)
+            .HasColumnName("DT_INICIO_ATENDIMENTO")
+            .IsRequired(false);
+
+        builder.Property(e => e.IdTriagemOrigem)
+            .HasColumnName("ID_TRIAGEM_ORIGEM")
+            .IsRequired(false);
+
+        builder.Property(e => e.DtLembreteConfirmacao)
+            .HasColumnName("DT_LEMBRETE_CONFIRMACAO")
+            .IsRequired(false);
+
+        builder.Property(e => e.DsRespostaConfirmacao)
+            .HasColumnName("DS_RESPOSTA_CONFIRMACAO")
+            .HasMaxLength(20)
+            .IsRequired(false);
+
+        builder.Property(e => e.DtRespostaConfirmacao)
+            .HasColumnName("DT_RESPOSTA_CONFIRMACAO")
+            .IsRequired(false);
+
         // AGENDAMENTO table (Java domain) has no ST_ATIVA column
         builder.Ignore(e => e.StAtiva);
 
@@ -128,5 +158,14 @@ public class AgendamentoConfiguration : IEntityTypeConfiguration<Agendamento>
         builder.HasOne(e => e.Veterinario)
             .WithMany()
             .HasForeignKey(e => e.IdVeterinario);
+
+        // A-7/REC-09: navegação opcional para a triagem de origem (ID_TRIAGEM_ORIGEM ->
+        // TRIAGEM_LUNA.ID_TRIAGEM, FK_AGEND_TRIAGEM da V23). FK opcional ⇒ EF gera LEFT
+        // JOIN no Include; o HasQueryFilter de TriagemLuna (KuraDbContext) continua
+        // ativo sobre a navegação — ver comentário em Agendamento.TriagemOrigem.
+        builder.HasOne(e => e.TriagemOrigem)
+            .WithMany()
+            .HasForeignKey(e => e.IdTriagemOrigem)
+            .IsRequired(false);
     }
 }
