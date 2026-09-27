@@ -218,8 +218,10 @@ public sealed class AgendaService : IAgendaService
     /// <summary>
     /// REC-10 — <c>POST /api/v1/agendamentos</c>. Validações relacionais copiadas do Java
     /// COM ÂNCORA (<c>backend-tutor-java</c> @ <c>d1522ee</c>,
-    /// <c>AgendamentoService.criar</c> :64-90 e <c>Agendamento.criar</c> :91-106,
-    /// conferidas em 2026-09-26 via <c>git show origin/main:&lt;arq&gt;</c>) + o que o G0
+    /// <c>AgendamentoService.criar</c> :64-90 e <c>Agendamento.criar</c> :96-112 —
+    /// corrigido pela G2 (m-1, era :91-106; conferido de novo em 2026-09-27 com
+    /// <c>git show d1522ee:.../Agendamento.java | grep -n "public static Agendamento criar\|return a;"</c>
+    /// ⇒ 96 e 112) + o que o G0
     /// item 9 mediu como AUSENTE no Java e o REC-10 adiciona por decisão do backlog:
     /// <list type="bullet">
     ///   <item><description><b>Tutor</b> — deve existir, estar ativo e ser da clínica do
@@ -253,6 +255,17 @@ public sealed class AgendaService : IAgendaService
     {
         var idClinica = _clinicaContext.IdClinica;
 
+        // G2-REC10/m-6 — DECLARADO: os 4 predicados explícitos abaixo (Tutor/Pet/
+        // Veterinario/TriagemLuna, todos "Id == id && IdClinica == idClinica") NÃO
+        // incluem "ativo" — quem garante isso hoje é só o `HasQueryFilter` global
+        // (KuraDbContext.ApplyTenantFilters, que combina StAtiva && IdClinica==filtro
+        // para as 4 entidades). Sob JWT de clínica (único caminho deste endpoint hoje,
+        // [Authorize]) isso é defesa em profundidade parcial, não um buraco: o filtro
+        // global está sempre ligado aqui. Se algum consumidor futuro deste service
+        // reaproveitar estes repositórios FORA de um contexto com JWT (filtro global
+        // desligado — ver G2-REC10/m-2 abaixo), tutor/pet/veterinário/triagem
+        // inativos deixariam de ser barrados. Sem teste que exija hoje — só
+        // declarado, por decisão do G2 (m-6, Minor).
         var tutor = await _tutorRepository.GetByIdAsync(dto.IdTutor, idClinica)
             ?? throw new EntidadeNaoEncontradaException("Tutor", dto.IdTutor);
 
@@ -272,12 +285,23 @@ public sealed class AgendaService : IAgendaService
             triagemOrigem = await _triagemLunaRepository.GetByIdAsync(dto.IdTriagemOrigem.Value, idClinica)
                 ?? throw new EntidadeNaoEncontradaException("TriagemLuna", dto.IdTriagemOrigem.Value);
 
-            // G2/m-4 — a FK (ID_TRIAGEM_ORIGEM -> TRIAGEM_LUNA) não amarra o tutor; quem
-            // amarra é esta comparação explícita. Triagem já confirmada da MESMA clínica
-            // acima (senão teria caído no 404 de cima) — aqui só falta o tutor.
+            // G2/m-4 (REC-09) — a FK (ID_TRIAGEM_ORIGEM -> TRIAGEM_LUNA) não amarra o tutor;
+            // quem amarra é esta comparação explícita. Triagem já confirmada da MESMA
+            // clínica acima (senão teria caído no 404 de cima) — aqui só falta o tutor.
             if (triagemOrigem.IdTutor != dto.IdTutor)
                 throw new RegraDeNegocioException(
                     $"Triagem {dto.IdTriagemOrigem} não pertence ao tutor {dto.IdTutor}.");
+
+            // G2-REC10/m-5 — DELIBERADO: nada aqui impede a MESMA triagem de originar N
+            // agendamentos (medido pela G2: POST duas vezes com o mesmo idTriagemOrigem ⇒
+            // 201, 201, dois agendamentos distintos com o mesmo ID_TRIAGEM_ORIGEM).
+            // Ruling do maestro: permitido de propósito — a recepção pode legitimamente
+            // reagendar/desdobrar um mesmo atendimento de triagem em mais de uma consulta
+            // (ex.: encaixe de emergência + retorno agendado a partir da mesma triagem), e
+            // não há requisito de produto que torne a triagem um recurso "consumível" 1:1.
+            // Não confundir com sobreposição de horário do MESMO veterinário, que também
+            // não é checada nesta v1 (ver o comentário de classe acima) — são preocupações
+            // independentes.
         }
 
         var agora = _relogioClinica.Agora();
