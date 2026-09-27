@@ -345,4 +345,147 @@ public class AgendaServiceTests
         ex.Which.Message.Should().Contain("não reconhecido");
         _uowMock.Verify(u => u.CommitAsync(), Times.Never);
     }
+
+    // ---------- REC-09/A-3: CalcularEtapaRecepcao (tabela-verdade) ----------
+
+    /// <summary>
+    /// Tabela-verdade completa da precedência A-3 — uma linha por combinação relevante de
+    /// (status, DtCheckin, DtInicioAtendimento). <c>CalcularEtapaRecepcao</c> é função pura
+    /// (nenhum mock necessário), testável diretamente.
+    /// </summary>
+    [Theory]
+    // 1. status terminal manda, mesmo com timestamps preenchidos.
+    [InlineData("REALIZADO", null, null, "FINALIZADO")]
+    [InlineData("REALIZADO", "2026-09-26T09:00", "2026-09-26T09:05", "FINALIZADO")]
+    [InlineData("CANCELADO", null, null, "CANCELADO")]
+    // caso explícito do aceite: check-in batido num agendamento cancelado NÃO reabre a etapa.
+    [InlineData("CANCELADO", "2026-09-26T09:00", null, "CANCELADO")]
+    [InlineData("NAO_COMPARECEU", null, null, "NAO_COMPARECEU")]
+    [InlineData("NAO_COMPARECEU", "2026-09-26T09:00", "2026-09-26T09:05", "NAO_COMPARECEU")]
+    // 2. DT_INICIO_ATENDIMENTO sem DT_CHECKIN -- caso explícito do aceite (walk-in).
+    [InlineData("AGENDADO", null, "2026-09-26T09:05", "EM_ATENDIMENTO")]
+    [InlineData("CONFIRMADO", null, "2026-09-26T09:05", "EM_ATENDIMENTO")]
+    [InlineData("AGENDADO", "2026-09-26T09:00", "2026-09-26T09:05", "EM_ATENDIMENTO")]
+    // 3. só DT_CHECKIN.
+    [InlineData("AGENDADO", "2026-09-26T09:00", null, "CHEGOU")]
+    [InlineData("CONFIRMADO", "2026-09-26T09:00", null, "CHEGOU")]
+    // 4. sem timestamps: o próprio status.
+    [InlineData("AGENDADO", null, null, "AGENDADO")]
+    [InlineData("CONFIRMADO", null, null, "CONFIRMADO")]
+    // defensivo: INTENCAO/status nulo nunca aparecem em produção (FD-06), mas a função é
+    // total -- cai no fallback AGENDADO em vez de lançar (GET /agenda não pode 500 por isso).
+    [InlineData("INTENCAO", null, null, "AGENDADO")]
+    [InlineData(null, null, null, "AGENDADO")]
+    public void CalcularEtapaRecepcao_TabelaVerdade(
+        string? stStatus, string? dtCheckinStr, string? dtInicioStr, string esperado)
+    {
+        // Arrange
+        DateTime? dtCheckin = dtCheckinStr is null ? null : DateTime.Parse(dtCheckinStr);
+        DateTime? dtInicio = dtInicioStr is null ? null : DateTime.Parse(dtInicioStr);
+
+        // Act
+        var etapa = AgendaService.CalcularEtapaRecepcao(stStatus, dtCheckin, dtInicio);
+
+        // Assert
+        etapa.Should().Be(esperado);
+    }
+
+    /// <summary>
+    /// GetAgendaAsync projeta DsEtapaRecepcao usando a mesma função -- prova a fiação, não só
+    /// a função isolada.
+    /// </summary>
+    [Fact]
+    public async Task GetAgendaAsync_ProjetaDsEtapaRecepcao()
+    {
+        // Arrange
+        var agendamentos = new List<Agendamento>
+        {
+            new()
+            {
+                Id = 1,
+                IdClinica = 1,
+                DtAgendamento = Inicio.AddHours(9),
+                StStatus = "AGENDADO",
+                DtCheckin = Inicio.AddHours(8).AddMinutes(50),
+                StAtiva = true
+            }
+        };
+        _readRepoMock.Setup(r => r.GetByIntervaloAsync(1L, Inicio, Fim, null))
+            .ReturnsAsync(agendamentos);
+
+        // Act
+        var result = await _sut.GetAgendaAsync(Inicio, Fim, null);
+
+        // Assert
+        result.Agendamentos[0].DsEtapaRecepcao.Should().Be("CHEGOU");
+    }
+
+    // ---------- REC-09 aceite (d): DsFotoThumbUrl reaproveita o gerador da FT-04 ----------
+
+    [Fact]
+    public async Task GetAgendaAsync_ComFotoDoPet_UsaGeradorUrlFotoPetComSufixoThumb()
+    {
+        // Arrange
+        var agendamentos = new List<Agendamento>
+        {
+            new()
+            {
+                Id = 1,
+                IdClinica = 1,
+                DtAgendamento = Inicio.AddHours(9),
+                StStatus = "AGENDADO",
+                StAtiva = true,
+                Pet = new Pet { Id = 5, NmPet = "Rex", IdClinica = 1, IdEspecie = 1, DsFotoChave = "clinica/1/pet/5/foto" }
+            }
+        };
+        _readRepoMock.Setup(r => r.GetByIntervaloAsync(1L, Inicio, Fim, null))
+            .ReturnsAsync(agendamentos);
+        _geradorUrlFotoPetMock
+            .Setup(g => g.GerarUrl("clinica/1/pet/5/foto", Kura.Domain.Storage.ChaveFotoPet.SufixoThumb))
+            .Returns("https://kura.example/api/v1/fotos/clinica_1_pet_5_foto-thumb?exp=1&sig=abc");
+
+        // Act
+        var result = await _sut.GetAgendaAsync(Inicio, Fim, null);
+
+        // Assert
+        result.Agendamentos[0].DsFotoThumbUrl.Should().Be(
+            "https://kura.example/api/v1/fotos/clinica_1_pet_5_foto-thumb?exp=1&sig=abc");
+        _geradorUrlFotoPetMock.Verify(
+            g => g.GerarUrl("clinica/1/pet/5/foto", Kura.Domain.Storage.ChaveFotoPet.SufixoThumb),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// Mordida do aceite (d): pet sem foto (DsFotoChave nula) precisa continuar devolvendo
+    /// null -- não uma URL para uma chave vazia. Reaproveita o contrato já documentado em
+    /// IGeradorUrlFotoPet.GerarUrl (nunca lança para chave nula/vazia).
+    /// </summary>
+    [Fact]
+    public async Task GetAgendaAsync_PetSemFoto_DsFotoThumbUrlNulo()
+    {
+        // Arrange
+        var agendamentos = new List<Agendamento>
+        {
+            new()
+            {
+                Id = 1,
+                IdClinica = 1,
+                DtAgendamento = Inicio.AddHours(9),
+                StStatus = "AGENDADO",
+                StAtiva = true,
+                Pet = new Pet { Id = 5, NmPet = "Rex", IdClinica = 1, IdEspecie = 1, DsFotoChave = null }
+            }
+        };
+        _readRepoMock.Setup(r => r.GetByIntervaloAsync(1L, Inicio, Fim, null))
+            .ReturnsAsync(agendamentos);
+        _geradorUrlFotoPetMock
+            .Setup(g => g.GerarUrl(null, Kura.Domain.Storage.ChaveFotoPet.SufixoThumb))
+            .Returns((string?)null);
+
+        // Act
+        var result = await _sut.GetAgendaAsync(Inicio, Fim, null);
+
+        // Assert
+        result.Agendamentos[0].DsFotoThumbUrl.Should().BeNull();
+    }
 }
