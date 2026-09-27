@@ -379,6 +379,16 @@ public class AgendaServiceTests
     // total -- cai no fallback AGENDADO em vez de lançar (GET /agenda não pode 500 por isso).
     [InlineData("INTENCAO", null, null, "AGENDADO")]
     [InlineData(null, null, null, "AGENDADO")]
+    // G2/m-3: status FORA do CHECK do Oracle (linha corrompida, ou mapa que envelheceu) --
+    // sem estas linhas, um fallback que vazasse o status cru ("FOO") ficaria verde, porque a
+    // única linha com status desconhecido (INTENCAO) cai no MESMO valor (AGENDADO) que um
+    // fallback correto produziria por outro motivo. Nunca pode sair um valor fora do domínio
+    // de 7 (aceite (a) original + esta ressalva) -- a derivação continua pelas datas.
+    [InlineData("FOO", null, null, "AGENDADO")]
+    [InlineData("FOO", "2026-09-26T09:00", null, "CHEGOU")]
+    // status terminal ganha de início de atendimento também -- não só de check-in (a linha
+    // "CANCELADO"+checkin já existia; faltava a mesma garantia para DT_INICIO_ATENDIMENTO).
+    [InlineData("CANCELADO", null, "2026-09-26T09:05", "CANCELADO")]
     public void CalcularEtapaRecepcao_TabelaVerdade(
         string? stStatus, string? dtCheckinStr, string? dtInicioStr, string esperado)
     {
