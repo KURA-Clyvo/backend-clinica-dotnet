@@ -163,7 +163,12 @@ public class ObservabilityExtensionsTests
             Mock.Of<IAgendamentoRepository>(),
             Mock.Of<IUnitOfWork>(),
             Mock.Of<IGeradorUrlFotoPet>(),
-            NullLogger<AgendaService>.Instance);
+            NullLogger<AgendaService>.Instance,
+            Mock.Of<ITutorRepository>(),
+            Mock.Of<IPetRepository>(),
+            Mock.Of<IVeterinarioRepository>(),
+            Mock.Of<ITriagemLunaRepository>(),
+            Mock.Of<IRelogioClinica>());
 
         using var spanDeBorda = fonteDeBordaSimulada.StartActivity("GET /api/v1/agenda", ActivityKind.Server);
         spanDeBorda.Should().NotBeNull(
@@ -290,7 +295,12 @@ public class ObservabilityExtensionsTests
             Mock.Of<IAgendamentoRepository>(),
             Mock.Of<IUnitOfWork>(),
             Mock.Of<IGeradorUrlFotoPet>(),
-            NullLogger<AgendaService>.Instance);
+            NullLogger<AgendaService>.Instance,
+            Mock.Of<ITutorRepository>(),
+            Mock.Of<IPetRepository>(),
+            Mock.Of<IVeterinarioRepository>(),
+            Mock.Of<ITriagemLunaRepository>(),
+            Mock.Of<IRelogioClinica>());
 
         using var fonteHttpSimulada = new ActivitySource("Microsoft.AspNetCore");
         using var spanDeBorda = fonteHttpSimulada.StartActivity("GET api/v1/agenda", ActivityKind.Server);

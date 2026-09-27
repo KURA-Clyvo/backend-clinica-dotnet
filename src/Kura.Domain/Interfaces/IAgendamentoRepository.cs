@@ -45,5 +45,9 @@ public interface IAgendamentoRepository
     /// </summary>
     Task<int> ContarTeleorientacoesHojeAsync(long idClinica, DateTime data);
 
+    /// <summary>REC-10 — primeira escrita de <c>INSERT</c> nesta tabela pelo lado
+    /// <c>.NET</c> (até aqui só <c>Update</c>, em <c>AtualizarStatusAsync</c>).</summary>
+    Task AddAsync(Agendamento agendamento);
+
     void Update(Agendamento agendamento);
 }

@@ -49,6 +49,9 @@ public class AgendamentoRepository : IAgendamentoRepository
                 && a.DtInicioSessao!.Value.Date == data.Date)
             .CountAsync();
 
+    public async Task AddAsync(Agendamento agendamento)
+        => await _context.Agendamentos.AddAsync(agendamento);
+
     public void Update(Agendamento agendamento)
         => _context.Agendamentos.Update(agendamento);
 }

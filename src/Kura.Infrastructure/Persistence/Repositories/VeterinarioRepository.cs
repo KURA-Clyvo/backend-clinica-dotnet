@@ -18,4 +18,8 @@ public class VeterinarioRepository : Repository<Veterinario>, IVeterinarioReposi
     /// <inheritdoc />
     public Task<Veterinario?> BuscarPorIdIgnorandoFiltrosAsync(long id) =>
         _dbSet.IgnoreQueryFilters().FirstOrDefaultAsync(v => v.Id == id);
+
+    /// <inheritdoc />
+    public Task<Veterinario?> GetByIdAsync(long id, long idClinica) =>
+        _dbSet.FirstOrDefaultAsync(v => v.Id == id && v.IdClinica == idClinica);
 }

@@ -221,6 +221,10 @@ public class AuthServiceTransacaoTests
         // desta classe exercita o caminho de vinculo de veterinario.
         public Task<Veterinario?> BuscarPorIdIgnorandoFiltrosAsync(long id) =>
             Task.FromResult(_store.FirstOrDefault(v => v.Id == id));
+
+        // REC-10: idem -- fake sem filtro nenhum, so para satisfazer a interface.
+        public Task<Veterinario?> GetByIdAsync(long id, long idClinica) =>
+            Task.FromResult(_store.FirstOrDefault(v => v.Id == id && v.IdClinica == idClinica));
     }
 
     /// <summary>
