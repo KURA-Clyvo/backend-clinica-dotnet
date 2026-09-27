@@ -20,6 +20,9 @@ public class TriagemLunaRepository(KuraDbContext context) : ITriagemLunaReposito
         await context.TriagensLuna.AddAsync(entidade);
     }
 
+    public Task<TriagemLuna?> GetByIdAsync(long id, long idClinica) =>
+        context.TriagensLuna.FirstOrDefaultAsync(t => t.Id == id && t.IdClinica == idClinica);
+
     /// <summary>
     /// LU-08 — GET /api/v1/luna/triagens. O join com INTERACAO_CANAL é feito com uma
     /// chave composta (IdInteracao, IdClinica) — a metade IdClinica é o predicado

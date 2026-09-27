@@ -33,4 +33,11 @@ public class PetRepository : Repository<Pet>, IPetRepository
                 .ThenInclude(tp => tp.Tutor)
             .FirstOrDefaultAsync(p => p.Id == id);
     }
+
+    public async Task<Pet?> GetByIdComVinculosAsync(long id, long idClinica)
+    {
+        return await _dbSet
+            .Include(p => p.TutorPets)
+            .FirstOrDefaultAsync(p => p.Id == id && p.IdClinica == idClinica);
+    }
 }

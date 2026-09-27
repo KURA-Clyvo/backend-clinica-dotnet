@@ -33,4 +33,18 @@ public interface IVeterinarioRepository : IRepository<Veterinario>
     /// clinica nem <c>ST_ATIVA</c>.</para>
     /// </summary>
     Task<Veterinario?> BuscarPorIdIgnorandoFiltrosAsync(long id);
+
+    /// <summary>
+    /// REC-10 — busca por PK com <c>ID_CLINICA</c> EXPLÍCITO no predicado (A-7), defesa em
+    /// profundidade sobre o <c>HasQueryFilter</c> de <c>Veterinario</c>. Diferente de
+    /// <see cref="BuscarPorIdIgnorandoFiltrosAsync"/> (que existe para IGNORAR o filtro e
+    /// comparar clínica à mão num contexto sem JWT), aqui o consumidor JÁ tem JWT de clínica
+    /// (<c>POST /api/v1/agendamentos</c> é <c>[Authorize]</c>) — o predicado explícito é só
+    /// para não depender só do filtro global, mesma razão de
+    /// <c>ITutorRepository.GetByIdAsync(id, idClinica)</c>. Devolve <see langword="null"/>
+    /// tanto para id inexistente quanto para veterinário de outra clínica ou inativo — mesma
+    /// resposta, sem oráculo. Java NÃO valida o veterinário (G0 item 9); esta é a validação
+    /// que o REC-10 adiciona, além do Java.
+    /// </summary>
+    Task<Veterinario?> GetByIdAsync(long id, long idClinica);
 }

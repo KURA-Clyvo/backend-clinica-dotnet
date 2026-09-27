@@ -12,8 +12,18 @@ public class AgendamentoConfiguration : IEntityTypeConfiguration<Agendamento>
 
         builder.HasKey(e => e.Id);
 
+        // REC-10/A-4: a V23 (backend-tutor-java d1522ee) converteu a coluna de IDENTITY
+        // para DEFAULT SEQ_AGENDAMENTO.NEXTVAL (DROP IDENTITY + ADD DEFAULT, molde da V12
+        // -- G0 item 1) exatamente para fechar a "estratégia dupla" que colidia com o Java
+        // (ORA-00001, provado na sonda do G0). Mesmo padrão de PetConfiguration/
+        // TutorConfiguration: HasDefaultValueSql faz o EF OMITIR a coluna no INSERT e
+        // deixar o Oracle aplicar o default -- que agora é a sequence, não mais a
+        // identity. Sem esta linha (ou se ela regredir para ValueGeneratedNever/valor
+        // explícito), o primeiro INSERT do .NET voltaria a colidir com os ids que o Java
+        // já gerou -- ver AgendamentoPkStrategyTests para a trava de metadado.
         builder.Property(e => e.Id)
-            .HasColumnName("ID_AGENDAMENTO");
+            .HasColumnName("ID_AGENDAMENTO")
+            .HasDefaultValueSql("SEQ_AGENDAMENTO.NEXTVAL");
 
         builder.Property(e => e.IdClinica)
             .HasColumnName("ID_CLINICA")
