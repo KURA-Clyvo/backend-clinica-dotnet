@@ -10,12 +10,19 @@ public class DashboardServiceTests
 {
     private const long IdClinicaContexto = 1;
 
+    // REC-08 -- "agora" fixo do relógio da clínica para esta suíte inteira (não
+    // DateTime.UtcNow: o valor precisa ser ESTÁVEL para casar com o Setup que compara exato em
+    // GetHojeAsync_ChamaContarTeleorientacoesHojeComIdClinicaDoContextoEPropagaParaODto). Longe
+    // de meia-noite de propósito, para não ficar flaky perto da virada de dia.
+    private static readonly DateTime AgoraFixa = new(2026, 9, 26, 15, 0, 0);
+
     private readonly Mock<IEventoClinicoRepository> _eventoMock = new();
     private readonly Mock<IRepository<AlertaTemperatura>> _alertaMock = new();
     private readonly Mock<IRepository<Pet>> _petMock = new();
     private readonly Mock<IRepository<Vacina>> _vacinaMock = new();
     private readonly Mock<IAgendamentoRepository> _agendamentoMock = new();
     private readonly Mock<IClinicaContext> _clinicaContextMock = new();
+    private readonly IRelogioClinica _relogio = new RelogioClinicaFixo(AgoraFixa);
     private readonly DashboardService _sut;
 
     public DashboardServiceTests()
@@ -26,7 +33,7 @@ public class DashboardServiceTests
         _sut = new DashboardService(
             _eventoMock.Object, _alertaMock.Object,
             _petMock.Object, _vacinaMock.Object,
-            _agendamentoMock.Object, _clinicaContextMock.Object);
+            _agendamentoMock.Object, _clinicaContextMock.Object, _relogio);
     }
 
     [Fact]
@@ -125,11 +132,39 @@ public class DashboardServiceTests
             r => r.GetProximosDoDiaAsync(IdClinicaContexto, It.IsAny<DateTime>(), 3), Times.Once);
     }
 
+    /// <summary>
+    /// G2 REC-08, achado I-1 (Important): antes desta fix wave, esta chamada era verificada só
+    /// com <c>It.IsAny&lt;DateTime&gt;()</c> -- reverter <c>DashboardService.cs</c> (call site
+    /// #1) de volta para <c>DateTime.UtcNow</c> passava com a suíte inteira verde, porque
+    /// nenhum teste conferia QUAL valor chegava ao repositório. <c>AgoraFixa</c> está longe do
+    /// <c>UtcNow</c> real da máquina que roda a suíte -- só passa se o valor vier do
+    /// <see cref="IRelogioClinica"/> injetado.
+    /// </summary>
+    [Fact]
+    public async Task GetHojeAsync_ChamaGetProximosDoDiaComOAgoraExatoDoRelogio_NaoUtcNowReal()
+    {
+        // Arrange
+        _eventoMock.Setup(r => r.GetByFiltersAsync(null, null, null, null, null))
+            .ReturnsAsync(new List<EventoClinico>());
+        _alertaMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<AlertaTemperatura>());
+        _agendamentoMock.Setup(r => r.GetProximosDoDiaAsync(IdClinicaContexto, AgoraFixa, 3))
+            .ReturnsAsync(new List<Agendamento>());
+
+        // Act
+        await _sut.GetHojeAsync();
+
+        // Assert -- Verify checa a invocação REAL, não depende do Setup ter casado: se o
+        // produtor mandar outro valor (ex. DateTime.UtcNow real), esta linha falha.
+        _agendamentoMock.Verify(r => r.GetProximosDoDiaAsync(IdClinicaContexto, AgoraFixa, 3), Times.Once);
+    }
+
     [Fact]
     public async Task GetHojeAsync_ChamaContarTeleorientacoesHojeComIdClinicaDoContextoEPropagaParaODto()
     {
-        // Arrange -- FD-17 item 3
-        var hoje = DateTime.UtcNow.Date;
+        // Arrange -- FD-17 item 3. REC-08: "hoje" aqui tem que ser o DO RELÓGIO (agora.Date),
+        // não DateTime.UtcNow.Date -- é o que DashboardService.GetHojeAsync agora passa para
+        // ContarTeleorientacoesHojeAsync.
+        var hoje = AgoraFixa.Date;
         _eventoMock.Setup(r => r.GetByFiltersAsync(null, null, null, null, null))
             .ReturnsAsync(new List<EventoClinico>());
         _alertaMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<AlertaTemperatura>());
@@ -200,5 +235,26 @@ public class DashboardServiceTests
 
         _agendamentoMock.Verify(r => r.GetRecentesAsync(IdClinicaContexto, It.IsAny<DateTime>(), It.IsAny<int>()), Times.Once);
         _agendamentoMock.Verify(r => r.GetProximosDoDiaAsync(It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<int>()), Times.Never);
+    }
+
+    /// <summary>
+    /// G2 REC-08, achado I-1 (Important): mesma lacuna do teste de <c>GetProximosDoDiaAsync</c>
+    /// acima, para <c>GetRecentesAsync</c> (call site #3, <c>DashboardService.cs:138</c>).
+    /// Reverter para <c>DateTime.UtcNow</c> passava com a suíte inteira verde antes desta fix
+    /// wave -- nenhum teste conferia o valor exato do argumento.
+    /// </summary>
+    [Fact]
+    public async Task GetRecentesAsync_ChamaRepositorioComOAgoraExatoDoRelogio_NaoUtcNowReal()
+    {
+        // Arrange -- 10 == DashboardService.LimiteAgendamentosRecentes (private const, valor
+        // copiado aqui; se o produtor mudar o limite, este teste avisa via falha de Verify).
+        _agendamentoMock.Setup(r => r.GetRecentesAsync(IdClinicaContexto, AgoraFixa, 10))
+            .ReturnsAsync(new List<Agendamento>());
+
+        // Act
+        await _sut.GetRecentesAsync();
+
+        // Assert
+        _agendamentoMock.Verify(r => r.GetRecentesAsync(IdClinicaContexto, AgoraFixa, 10), Times.Once);
     }
 }

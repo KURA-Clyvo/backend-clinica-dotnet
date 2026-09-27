@@ -15,7 +15,15 @@ public interface IAgendamentoRepository
     /// consumidor (<c>DashboardService</c>) lê <c>IClinicaContext.IdClinica</c> e passa
     /// explicitamente — nunca confiar em filtro global aqui.
     /// </summary>
-    Task<IEnumerable<Agendamento>> GetProximosDoDiaAsync(long idClinica, DateTime data, int limite);
+    /// <summary>
+    /// REC-08 -- o parâmetro <c>agora</c> serve DUAS finalidades: casar o dia
+    /// (<c>DtAgendamento.Date == agora.Date</c>) e o corte de futuro
+    /// (<c>DtAgendamento >= agora</c>). Antes deste ajuste, o repositório usava
+    /// <c>DateTime.UtcNow</c> internamente para o corte de futuro, ignorando este parâmetro --
+    /// achado do G0 item 3 ("2º UtcNow escondido"). O chamador deve passar
+    /// <c>IRelogioClinica.Agora()</c> (hora local de SP), nunca <c>DateTime.UtcNow</c>.
+    /// </summary>
+    Task<IEnumerable<Agendamento>> GetProximosDoDiaAsync(long idClinica, DateTime agora, int limite);
     Task<IEnumerable<Agendamento>> GetRecentesAsync(long idClinica, DateTime referencia, int limite);
     Task<Agendamento?> GetByIdAsync(long id, long idClinica);
 

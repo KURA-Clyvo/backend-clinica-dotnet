@@ -11,11 +11,16 @@ using Kura.Domain.Interfaces;
 
 public class TeleconsultaServiceTests
 {
+    // REC-08 -- "agora" fixo do relógio da clínica, usado pelo teste que prova que
+    // DtInicioSessao vem do relógio injetado, não de DateTime.UtcNow real.
+    internal static readonly DateTime AgoraFixa = new(2026, 9, 26, 15, 0, 0);
+
     private readonly Mock<IAgendamentoRepository> _agendamentoRepoMock = new();
     private readonly Mock<IConsentimentoRepository> _consentimentoRepoMock = new();
     private readonly Mock<IDailyService> _dailyServiceMock = new();
     private readonly Mock<IClinicaContext> _clinicaMock = new();
     private readonly Mock<IUnitOfWork> _uowMock = new();
+    private readonly IRelogioClinica _relogio = new RelogioClinicaFixo(AgoraFixa);
     private readonly TeleconsultaService _sut;
 
     public TeleconsultaServiceTests()
@@ -28,7 +33,8 @@ public class TeleconsultaServiceTests
             _consentimentoRepoMock.Object,
             _dailyServiceMock.Object,
             _clinicaMock.Object,
-            _uowMock.Object);
+            _uowMock.Object,
+            _relogio);
     }
 
     private static Agendamento AgendamentoSemSala(long idTutor = 5) => new()
@@ -81,6 +87,10 @@ public class TeleconsultaServiceTests
         result.DsProvedorVideo.Should().Be("DAILY");
         result.StFallbackManual.Should().BeFalse();
         agendamento.StTeleconsulta.Should().BeTrue();
+        // REC-08 (call site #5 do G0 item 3) -- DtInicioSessao vem do relógio INJETADO, não de
+        // DateTime.UtcNow real. AgoraFixa está longe do UtcNow real da máquina que roda a
+        // suíte, então esta asserção só passa se o valor vier de fato do IRelogioClinica.
+        agendamento.DtInicioSessao.Should().Be(AgoraFixa);
         _agendamentoRepoMock.Verify(r => r.Update(agendamento), Times.Once);
         _uowMock.Verify(u => u.CommitAsync(), Times.Once);
     }

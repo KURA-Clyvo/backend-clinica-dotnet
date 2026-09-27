@@ -17,13 +17,20 @@ public class AgendaReadRepository(KuraDbContext context) : IAgendamentoReadRepos
         activity?.SetTag("kura.layer", "Infrastructure");
         activity?.SetTag("kura.id_clinica", idClinica);
 
+        // REC-08/G0 item 3 -- achado novo: dataInicio/dataFim chegam como MEIA-NOITE (o app
+        // manda "YYYY-MM-DD" sem hora), e o intervalo era FECHADO nos dois extremos
+        // (`<= dataFim`). Um agendamento marcado às 10h do último dia do intervalo (inclusive
+        // "dataInicio == dataFim", a consulta de um dia só) ficava de fora, porque 10:00 > 00:00.
+        // Fim EXCLUSIVO (`< dataFim.Date + 1 dia`) resolve sem depender de hora: cobre o dia
+        // inteiro de dataFim. `.Date` nos dois extremos normaliza caso algum dia um chamador
+        // comece a mandar hora (contrato do controller continua "datas inclusive").
         var query = context.Agendamentos
             .Include(a => a.Pet)
             .Include(a => a.Tutor)
             .Include(a => a.Veterinario)
             .Where(a => a.IdClinica == idClinica
-                     && a.DtAgendamento >= dataInicio
-                     && a.DtAgendamento <= dataFim);
+                     && a.DtAgendamento >= dataInicio.Date
+                     && a.DtAgendamento < dataFim.Date.AddDays(1));
 
         if (idVeterinario.HasValue)
             query = query.Where(a => a.IdVeterinario == idVeterinario.Value);

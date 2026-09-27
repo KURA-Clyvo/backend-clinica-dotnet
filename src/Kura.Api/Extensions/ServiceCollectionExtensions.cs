@@ -91,6 +91,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
         services.AddScoped<IClinicaContext, ClinicaContext>();
+        // REC-08/A-5 -- singleton: sem estado por request (fuso lido uma vez no construtor,
+        // TimeProvider já é singleton -- ver registro logo abaixo).
+        services.AddSingleton<IRelogioClinica, RelogioClinica>();
         services.AddScoped<Kura.Api.Filters.ApiKeyAuthFilter>();
         services.AddScoped<Kura.Api.Filters.LunaApiKeyAuthFilter>();
 

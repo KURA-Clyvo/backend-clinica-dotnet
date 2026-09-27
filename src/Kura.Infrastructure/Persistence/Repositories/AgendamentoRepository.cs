@@ -13,12 +13,16 @@ public class AgendamentoRepository : IAgendamentoRepository
         _context = context;
     }
 
-    public async Task<IEnumerable<Agendamento>> GetProximosDoDiaAsync(long idClinica, DateTime data, int limite)
+    public async Task<IEnumerable<Agendamento>> GetProximosDoDiaAsync(long idClinica, DateTime agora, int limite)
     {
+        // REC-08 -- antes comparava com DateTime.UtcNow direto aqui dentro, ignorando o
+        // parâmetro recebido (2º UtcNow escondido, achado do G0 item 3). "Agora" passa a vir
+        // SEMPRE de fora (IRelogioClinica, hora local de SP) -- este repositório não lê relógio
+        // nenhum, só usa o que o chamador mandou, para os dois usos (data do dia E instante).
         return await _context.Agendamentos
             .Where(a => a.IdClinica == idClinica
-                && a.DtAgendamento.Date == data.Date
-                && a.DtAgendamento >= DateTime.UtcNow)
+                && a.DtAgendamento.Date == agora.Date
+                && a.DtAgendamento >= agora)
             .OrderBy(a => a.DtAgendamento)
             .Take(limite)
             .ToListAsync();

@@ -80,6 +80,36 @@ public class AgendamentoRepositoryTests
         resultadoClinica1.Should().NotContain(a => a.IdClinica == 2);
     }
 
+    /// <summary>
+    /// REC-08 (call site #2 do G0 item 3) -- MUTAÇÃO OBRIGATÓRIA. Antes deste ajuste, o
+    /// método usava <c>DateTime.UtcNow</c> DIRETO no corte de futuro, ignorando o parâmetro
+    /// recebido -- "2º UtcNow escondido no repositório". <c>agora</c> aqui é DELIBERADAMENTE
+    /// uma data no PASSADO distante em relação ao UtcNow real desta máquina (2020, não 2026+):
+    /// sob o código antigo, <c>DtAgendamento(2020) >= DateTime.UtcNow(real, ~2026)</c> é FALSO
+    /// e a linha some; sob o código novo, <c>DtAgendamento(2020) >= agora(2020)</c> é
+    /// verdadeiro e ela aparece. Só passa se o método usar de fato o parâmetro recebido.
+    /// </summary>
+    [Fact]
+    public async Task GetProximosDoDiaAsync_UsaOParametroAgoraRecebido_NaoODateTimeUtcNowReal()
+    {
+        // Arrange
+        var ctx = CreateContext();
+        var agora = new DateTime(2020, 5, 10, 9, 0, 0);
+
+        ctx.Agendamentos.Add(
+            new Agendamento { Id = 1, IdClinica = 1, NmPaciente = "Passado-real-mas-futuro-do-agora", DtAgendamento = agora });
+        await ctx.SaveChangesAsync();
+
+        var repository = new AgendamentoRepository(ctx);
+
+        // Act
+        var resultado = (await repository.GetProximosDoDiaAsync(1, agora, 10)).ToList();
+
+        // Assert
+        resultado.Should().ContainSingle();
+        resultado[0].NmPaciente.Should().Be("Passado-real-mas-futuro-do-agora");
+    }
+
     /// <summary>FD-17 item 1 -- mesma mutação, para <c>GetProximosDoDiaAsync</c>.</summary>
     [Fact]
     public async Task GetProximosDoDiaAsync_ComAgendamentosDeDuasClinicas_RetornaApenasOsDaClinicaPedida()
