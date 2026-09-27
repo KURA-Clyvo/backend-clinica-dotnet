@@ -594,6 +594,66 @@ public class CrossTenantRegressionTests
         await act.Should().ThrowAsync<EntidadeNaoEncontradaException>();
     }
 
+    /// <summary>
+    /// G2-REC10/m-2 — mesma classe de achado do isolador do Veterinário, medida pela G2
+    /// (M7 do `g2-rec10.md`): mutar <c>TutorRepository.GetByIdAsync</c> removendo
+    /// <c>&amp;&amp; t.IdClinica == idClinica</c> deixava a suíte 1027/0 VERDE, porque
+    /// <c>CriarAsync_TutorDeOutraClinica_LancaEntidadeNaoEncontrada</c> roda com
+    /// <c>idClinicaFiltro: ClinicaA</c> e o <c>HasQueryFilter</c> GLOBAL de <c>Tutor</c>
+    /// sozinho já bloqueava. Este teste isola o predicado EXPLÍCITO (filtro global
+    /// desligado, <c>idClinicaFiltro: null</c>).
+    /// </summary>
+    [Fact]
+    public async Task CriarAsync_SemFiltroGlobalAtivo_TutorDeOutraClinica_AindaAssimBloqueadoPeloPredicadoExplicito()
+    {
+        // Arrange
+        var dbName = Guid.NewGuid().ToString();
+        await SeedDuasClinicasParaAgendamentoAsync(dbName);
+        await using var ctxSemFiltroGlobal = CreateContext(dbName, idClinicaFiltro: null);
+        var sut = BuildAgendaServiceParaCriar(ctxSemFiltroGlobal, ClinicaA);
+
+        var dtoComTutorDeOutraClinica = new AgendamentoCreateDto
+        {
+            IdTutor = 2, // tutor da Clínica B
+            IdPet = 1,
+            IdVeterinario = 1,
+            DtAgendamento = DataDeTeste,
+            DsTipo = "CONSULTA"
+        };
+
+        // Act
+        var act = async () => await sut.CriarAsync(dtoComTutorDeOutraClinica);
+
+        // Assert
+        await act.Should().ThrowAsync<EntidadeNaoEncontradaException>();
+    }
+
+    /// <summary>G2-REC10/m-2 — idem, para <c>PetRepository.GetByIdComVinculosAsync</c>.</summary>
+    [Fact]
+    public async Task CriarAsync_SemFiltroGlobalAtivo_PetDeOutraClinica_AindaAssimBloqueadoPeloPredicadoExplicito()
+    {
+        // Arrange
+        var dbName = Guid.NewGuid().ToString();
+        await SeedDuasClinicasParaAgendamentoAsync(dbName);
+        await using var ctxSemFiltroGlobal = CreateContext(dbName, idClinicaFiltro: null);
+        var sut = BuildAgendaServiceParaCriar(ctxSemFiltroGlobal, ClinicaA);
+
+        var dtoComPetDeOutraClinica = new AgendamentoCreateDto
+        {
+            IdTutor = 1,
+            IdPet = 2, // pet da Clínica B
+            IdVeterinario = 1,
+            DtAgendamento = DataDeTeste,
+            DsTipo = "CONSULTA"
+        };
+
+        // Act
+        var act = async () => await sut.CriarAsync(dtoComPetDeOutraClinica);
+
+        // Assert
+        await act.Should().ThrowAsync<EntidadeNaoEncontradaException>();
+    }
+
     [Fact]
     public async Task CriarAsync_TriagemDeOutraClinica_LancaEntidadeNaoEncontrada()
     {
@@ -609,6 +669,30 @@ public class CrossTenantRegressionTests
         var act = async () => await sut.CriarAsync(dto);
 
         // Assert -- resposta idêntica à de uma triagem inexistente (não vaza que a triagem existe).
+        await act.Should().ThrowAsync<EntidadeNaoEncontradaException>();
+    }
+
+    /// <summary>G2-REC10/m-2 — idem, para <c>TriagemLunaRepository.GetByIdAsync</c>. O G2
+    /// apontou que este é o caso que mais importa a longo prazo: se a REC-15 (endpoints da
+    /// Luna, autenticados por API Key, SEM JWT de clínica) reaproveitar este mesmo método,
+    /// o filtro global de <c>TriagemLuna</c> fica inerte (mesma razão documentada em
+    /// <c>KuraDbContext.ApplyTenantFilters</c> para <c>InteracaoCanal</c>) e o predicado
+    /// explícito passa a ser a ÚNICA proteção.</summary>
+    [Fact]
+    public async Task CriarAsync_SemFiltroGlobalAtivo_TriagemDeOutraClinica_AindaAssimBloqueadoPeloPredicadoExplicito()
+    {
+        // Arrange
+        var dbName = Guid.NewGuid().ToString();
+        await SeedDuasClinicasParaAgendamentoAsync(dbName);
+        await using var ctxSemFiltroGlobal = CreateContext(dbName, idClinicaFiltro: null);
+        var sut = BuildAgendaServiceParaCriar(ctxSemFiltroGlobal, ClinicaA);
+
+        var dto = DtoValidoParaClinicaA(idTriagemOrigem: 2); // triagem 2 é da Clínica B
+
+        // Act
+        var act = async () => await sut.CriarAsync(dto);
+
+        // Assert
         await act.Should().ThrowAsync<EntidadeNaoEncontradaException>();
     }
 

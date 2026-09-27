@@ -856,7 +856,51 @@ public class AgendaServiceTests
         capturado.NrVersion.Should().Be(0);
         capturado.IdClinica.Should().Be(1L, "IdClinica vem do IClinicaContext, nunca do corpo (o DTO nem declara o campo)");
         capturado.StStatus.Should().Be("AGENDADO");
+        capturado.DtCriacao.Should().Be(new DateTime(2026, 10, 7, 9, 0, 0), "DtCriacao vem do IRelogioClinica.Agora() -- G2-REC10/m-3");
         result.DsOrigem.Should().Be("RECEPCAO");
+    }
+
+    /// <summary>
+    /// G2-REC10/m-3 — dedicado, com o relógio fixado numa data BEM diferente de "agora" real
+    /// (2030, futuro distante) para que a asserção não possa ser satisfeita por coincidência
+    /// nem por <c>DateTime.UtcNow</c>/<c>DateTime.Now</c> do momento em que o teste roda. A
+    /// G2 mediu (mutação MI): trocar <c>DtCriacao = agora</c> por
+    /// <c>DtCriacao = DateTime.UtcNow</c> deixava a suíte inteira verde -- nada travava que
+    /// <c>DT_CRIACAO</c> vem do relógio de SP (REC-08/A-5), não do relógio do processo. O
+    /// Java devolve este campo ao app do tutor (<c>AgendamentoResponse.fromEntity</c>) --
+    /// um `DtCriacao` em UTC gravado como se fosse hora de SP é +3h de erro visível lá.
+    /// </summary>
+    [Fact]
+    public async Task CriarAsync_DtCriacao_VemDoRelogioClinica_NaoDeUtcNow()
+    {
+        // Arrange
+        SetupCaminhoFeliz();
+        var agoraFixoDoRelogio = new DateTime(2030, 3, 15, 14, 22, 0);
+        _relogioClinicaMock.Setup(r => r.Agora()).Returns(agoraFixoDoRelogio);
+        // Sobrescreve a data do DTO para não colidir com o encaixe (o relógio mockado
+        // acima já cobre "agora"; a data do agendamento continua no "futuro" relativo a ele).
+        var dto = new AgendamentoCreateDto
+        {
+            IdTutor = 601,
+            IdPet = 501,
+            IdVeterinario = 10,
+            DtAgendamento = agoraFixoDoRelogio.AddDays(1),
+            DsTipo = "CONSULTA"
+        };
+        Agendamento? capturado = null;
+        _agendamentoRepoMock
+            .Setup(r => r.AddAsync(It.IsAny<Agendamento>()))
+            .Callback<Agendamento>(a => capturado = a)
+            .Returns(Task.CompletedTask);
+
+        // Act
+        await _sut.CriarAsync(dto);
+
+        // Assert
+        capturado.Should().NotBeNull();
+        capturado!.DtCriacao.Should().Be(agoraFixoDoRelogio);
+        capturado.DtCriacao.Should().NotBeCloseTo(DateTime.UtcNow, TimeSpan.FromDays(1),
+            "prova de que a data não veio de DateTime.UtcNow do momento do teste");
     }
 
     [Fact]
