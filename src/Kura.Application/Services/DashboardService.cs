@@ -13,6 +13,7 @@ public sealed class DashboardService : IDashboardService
     private readonly IRepository<Vacina> _vacinaRepository;
     private readonly IAgendamentoRepository _agendamentoRepository;
     private readonly IClinicaContext _clinicaContext;
+    private readonly IRelogioClinica _relogioClinica;
 
     public DashboardService(
         IEventoClinicoRepository eventoRepository,
@@ -20,7 +21,8 @@ public sealed class DashboardService : IDashboardService
         IRepository<Pet> petRepository,
         IRepository<Vacina> vacinaRepository,
         IAgendamentoRepository agendamentoRepository,
-        IClinicaContext clinicaContext)
+        IClinicaContext clinicaContext,
+        IRelogioClinica relogioClinica)
     {
         _eventoRepository = eventoRepository;
         _alertaRepository = alertaRepository;
@@ -28,11 +30,16 @@ public sealed class DashboardService : IDashboardService
         _vacinaRepository = vacinaRepository;
         _agendamentoRepository = agendamentoRepository;
         _clinicaContext = clinicaContext;
+        _relogioClinica = relogioClinica;
     }
 
     public async Task<DashboardHojeDto> GetHojeAsync()
     {
+        // REC-08 -- "hoje" (UTC) segue servindo SÓ o que compara com EventoClinico.DtEvento
+        // abaixo (fora do escopo da REC-08 -- mesmo defeito de fuso, tabela diferente, ver
+        // G0 item 3). Tudo que compara com AGENDAMENTO usa o relógio local de SP.
         var hoje = DateTime.UtcNow.Date;
+        var agora = _relogioClinica.Agora();
         var idClinica = _clinicaContext.IdClinica;
 
         // EventoClinico ESTÁ no ApplyTenantFilters (KuraDbContext), então GetByFiltersAsync já
@@ -68,12 +75,14 @@ public sealed class DashboardService : IDashboardService
         // FD-17 item 1 -- Agendamento NÃO tem HasQueryFilter (é a única exceção do
         // ApplyTenantFilters), então idClinica precisa ser passado explicitamente aqui, senão
         // o dashboard mistura agendamento de todas as clínicas.
-        var proximosAgendamentos = (await _agendamentoRepository.GetProximosDoDiaAsync(idClinica, DateTime.UtcNow, 3))
+        var proximosAgendamentos = (await _agendamentoRepository.GetProximosDoDiaAsync(idClinica, agora, 3))
             .Select(MapParaResumo)
             .ToList();
 
-        // FD-17 item 3 -- também escopado por clínica pela mesma razão acima.
-        var teleorientacoesHoje = await _agendamentoRepository.ContarTeleorientacoesHojeAsync(idClinica, hoje);
+        // FD-17 item 3 -- também escopado por clínica pela mesma razão acima. REC-08: "hoje"
+        // aqui é agora.Date (local de SP), consistente com quem grava DtInicioSessao
+        // (TeleconsultaService, também via IRelogioClinica) -- não o "hoje" UTC de EventoClinico.
+        var teleorientacoesHoje = await _agendamentoRepository.ContarTeleorientacoesHojeAsync(idClinica, agora.Date);
 
         return new DashboardHojeDto
         {
@@ -123,9 +132,10 @@ public sealed class DashboardService : IDashboardService
 
     public async Task<IEnumerable<AgendamentoResumoDto>> GetRecentesAsync()
     {
-        // FD-17 item 1 -- mesma correção de idClinica explícito (ver GetHojeAsync).
+        // FD-17 item 1 -- mesma correção de idClinica explícito (ver GetHojeAsync). REC-08:
+        // referência local de SP, não UtcNow -- ver IRelogioClinica.
         var recentes = await _agendamentoRepository.GetRecentesAsync(
-            _clinicaContext.IdClinica, DateTime.UtcNow, LimiteAgendamentosRecentes);
+            _clinicaContext.IdClinica, _relogioClinica.Agora(), LimiteAgendamentosRecentes);
         return recentes.Select(MapParaResumo).ToList();
     }
 

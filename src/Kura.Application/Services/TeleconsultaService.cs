@@ -16,19 +16,22 @@ public sealed class TeleconsultaService : ITeleconsultaService
     private readonly IDailyService _dailyService;
     private readonly IClinicaContext _clinicaContext;
     private readonly IUnitOfWork _uow;
+    private readonly IRelogioClinica _relogioClinica;
 
     public TeleconsultaService(
         IAgendamentoRepository agendamentoRepository,
         IConsentimentoRepository consentimentoRepository,
         IDailyService dailyService,
         IClinicaContext clinicaContext,
-        IUnitOfWork uow)
+        IUnitOfWork uow,
+        IRelogioClinica relogioClinica)
     {
         _agendamentoRepository = agendamentoRepository;
         _consentimentoRepository = consentimentoRepository;
         _dailyService = dailyService;
         _clinicaContext = clinicaContext;
         _uow = uow;
+        _relogioClinica = relogioClinica;
     }
 
     public async Task<TeleconsultaResponseDto> CriarOuObterSalaAsync(long idAgendamento)
@@ -48,7 +51,10 @@ public sealed class TeleconsultaService : ITeleconsultaService
         agendamento.DsSalaUrl = resultado.Url;
         agendamento.DsProvedorVideo = ProvedorDaily;
         agendamento.StTeleconsulta = true;
-        agendamento.DtInicioSessao = DateTime.UtcNow;
+        // REC-08/A-5 -- DT_INICIO_SESSAO é coluna de AGENDAMENTO (V10); grava hora local de SP,
+        // junto do chamador de ContarTeleorientacoesHojeAsync (DashboardService), que agora
+        // compara com o mesmo relógio (call sites #5/#6 do G0 item 3).
+        agendamento.DtInicioSessao = _relogioClinica.Agora();
 
         _agendamentoRepository.Update(agendamento);
         await _uow.CommitAsync();
