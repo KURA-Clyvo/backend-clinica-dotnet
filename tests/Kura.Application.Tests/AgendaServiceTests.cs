@@ -647,4 +647,263 @@ public class AgendaServiceTests
         item.DsEtapaRecepcao.Should().Be("CHEGOU"); // CONFIRMADO + checkin, sem início
         item.DsFotoThumbUrl.Should().Be("https://kura.example/api/v1/fotos/clinica/1/pet/501/abc_256.webp?exp=1&sig=xyz");
     }
+
+    // ---------- CriarAsync tests (REC-10) ----------
+
+    private static AgendamentoCreateDto BuildCreateDto(long? idTriagemOrigem = null) => new()
+    {
+        IdTutor = 601,
+        IdPet = 501,
+        IdVeterinario = 10,
+        DtAgendamento = new DateTime(2026, 10, 7, 9, 0, 0),
+        DsTipo = "CONSULTA",
+        IdTriagemOrigem = idTriagemOrigem
+    };
+
+    private static Tutor BuildTutor() => new() { Id = 601, IdClinica = 1, NmTutor = "João" };
+
+    private static Pet BuildPetVinculado() => new()
+    {
+        Id = 501,
+        IdClinica = 1,
+        NmPet = "Rex",
+        IdEspecie = 1,
+        TutorPets = [new TutorPet { IdTutor = 601, IdPet = 501 }]
+    };
+
+    private static Veterinario BuildVeterinario() =>
+        new() { Id = 10, IdClinica = 1, NmVeterinario = "Dr. Ana", NrCrmv = "1234" };
+
+    private void SetupCaminhoFeliz(TriagemLuna? triagem = null)
+    {
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(601L, 1L)).ReturnsAsync(BuildTutor());
+        _petRepoMock.Setup(r => r.GetByIdComVinculosAsync(501L, 1L)).ReturnsAsync(BuildPetVinculado());
+        _veterinarioRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync(BuildVeterinario());
+        _relogioClinicaMock.Setup(r => r.Agora()).Returns(new DateTime(2026, 10, 7, 9, 0, 0));
+        if (triagem is not null)
+            _triagemLunaRepoMock.Setup(r => r.GetByIdAsync(triagem.Id, 1L)).ReturnsAsync(triagem);
+    }
+
+    [Fact]
+    public async Task CriarAsync_TutorNaoEncontrado_LancaEntidadeNaoEncontrada()
+    {
+        // Arrange -- tutor da clínica errada (ou inexistente): o repositório escopado por
+        // idClinica devolve null pros dois casos, resposta idêntica (REC-10, sem oráculo).
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(601L, 1L)).ReturnsAsync((Tutor?)null);
+
+        // Act
+        var act = async () => await _sut.CriarAsync(BuildCreateDto());
+
+        // Assert
+        await act.Should().ThrowAsync<EntidadeNaoEncontradaException>();
+        _agendamentoRepoMock.Verify(r => r.AddAsync(It.IsAny<Agendamento>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CriarAsync_PetNaoEncontrado_LancaEntidadeNaoEncontrada()
+    {
+        // Arrange
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(601L, 1L)).ReturnsAsync(BuildTutor());
+        _petRepoMock.Setup(r => r.GetByIdComVinculosAsync(501L, 1L)).ReturnsAsync((Pet?)null);
+
+        // Act
+        var act = async () => await _sut.CriarAsync(BuildCreateDto());
+
+        // Assert
+        await act.Should().ThrowAsync<EntidadeNaoEncontradaException>();
+    }
+
+    [Fact]
+    public async Task CriarAsync_PetNaoVinculadoAoTutor_LancaRegraDeNegocio()
+    {
+        // Arrange -- pet existe na mesma clínica, mas o vínculo TutorPets é com OUTRO tutor.
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(601L, 1L)).ReturnsAsync(BuildTutor());
+        var petDeOutroTutor = new Pet
+        {
+            Id = 501,
+            IdClinica = 1,
+            NmPet = "Rex",
+            TutorPets = [new TutorPet { IdTutor = 999, IdPet = 501 }]
+        };
+        _petRepoMock.Setup(r => r.GetByIdComVinculosAsync(501L, 1L)).ReturnsAsync(petDeOutroTutor);
+
+        // Act
+        var act = async () => await _sut.CriarAsync(BuildCreateDto());
+
+        // Assert
+        await act.Should().ThrowAsync<RegraDeNegocioException>();
+    }
+
+    [Fact]
+    public async Task CriarAsync_VeterinarioNaoEncontrado_LancaEntidadeNaoEncontrada()
+    {
+        // Arrange -- G0 item 9: o Java NÃO valida isto; o REC-10 é mais estrito de propósito.
+        _tutorRepoMock.Setup(r => r.GetByIdAsync(601L, 1L)).ReturnsAsync(BuildTutor());
+        _petRepoMock.Setup(r => r.GetByIdComVinculosAsync(501L, 1L)).ReturnsAsync(BuildPetVinculado());
+        _veterinarioRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync((Veterinario?)null);
+
+        // Act
+        var act = async () => await _sut.CriarAsync(BuildCreateDto());
+
+        // Assert
+        await act.Should().ThrowAsync<EntidadeNaoEncontradaException>();
+    }
+
+    [Fact]
+    public async Task CriarAsync_TriagemNaoEncontrada_LancaEntidadeNaoEncontrada()
+    {
+        // Arrange -- triagem de outra clínica cai aqui também (mesmo repositório, mesmo
+        // predicado idClinica) -- resposta idêntica à inexistente, sem oráculo.
+        SetupCaminhoFeliz();
+        _triagemLunaRepoMock.Setup(r => r.GetByIdAsync(800L, 1L)).ReturnsAsync((TriagemLuna?)null);
+
+        // Act
+        var act = async () => await _sut.CriarAsync(BuildCreateDto(idTriagemOrigem: 800));
+
+        // Assert
+        await act.Should().ThrowAsync<EntidadeNaoEncontradaException>();
+    }
+
+    [Fact]
+    public async Task CriarAsync_TriagemDeOutroTutorDaMesmaClinica_LancaRegraDeNegocio()
+    {
+        // Arrange -- G2/m-4: a FK não amarra o tutor, quem amarra é o service. A triagem
+        // JÁ passou pelo filtro de clínica (existe e é da clínica 1) -- só o tutor diverge.
+        var triagemDeOutroTutor = new TriagemLuna
+        {
+            Id = 800,
+            IdClinica = 1,
+            IdTutor = 999,
+            DsNivelUrgencia = "ALTA",
+            DsDescricao = "SEGREDO"
+        };
+        SetupCaminhoFeliz(triagemDeOutroTutor);
+
+        // Act
+        var act = async () => await _sut.CriarAsync(BuildCreateDto(idTriagemOrigem: 800));
+
+        // Assert
+        await act.Should().ThrowAsync<RegraDeNegocioException>();
+    }
+
+    [Fact]
+    public async Task CriarAsync_DataDezesseisMinutosNoPassado_LancaRegraDeNegocio()
+    {
+        // Arrange -- ruling de encaixe: até 15 min no passado é tolerado, nunca mais.
+        // DtAgendamento fixo em 09:00:00 -- 16 min atrás do "agora" mockado (09:16:00).
+        SetupCaminhoFeliz();
+        _relogioClinicaMock.Setup(r => r.Agora()).Returns(new DateTime(2026, 10, 7, 9, 16, 0));
+
+        // Act
+        var act = async () => await _sut.CriarAsync(new AgendamentoCreateDto
+        {
+            IdTutor = 601,
+            IdPet = 501,
+            IdVeterinario = 10,
+            DtAgendamento = new DateTime(2026, 10, 7, 9, 0, 0),
+            DsTipo = "CONSULTA"
+        });
+
+        // Assert
+        await act.Should().ThrowAsync<RegraDeNegocioException>();
+        _agendamentoRepoMock.Verify(r => r.AddAsync(It.IsAny<Agendamento>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CriarAsync_DataQuatorzeMinutosNoPassado_Cria()
+    {
+        // Arrange -- dentro da tolerância de encaixe (15 min).
+        SetupCaminhoFeliz();
+        _relogioClinicaMock.Setup(r => r.Agora()).Returns(new DateTime(2026, 10, 7, 9, 14, 0));
+        _uowMock.Setup(u => u.CommitAsync()).ReturnsAsync(1);
+
+        var dto = new AgendamentoCreateDto
+        {
+            IdTutor = 601,
+            IdPet = 501,
+            IdVeterinario = 10,
+            DtAgendamento = new DateTime(2026, 10, 7, 9, 0, 0),
+            DsTipo = "CONSULTA"
+        };
+
+        // Act
+        var result = await _sut.CriarAsync(dto);
+
+        // Assert
+        result.DsStatus.Should().Be("AGENDADO");
+        _agendamentoRepoMock.Verify(r => r.AddAsync(It.IsAny<Agendamento>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task CriarAsync_SemTriagemOrigem_GravaOrigemRecepcaoENrVersionZero()
+    {
+        // Arrange
+        SetupCaminhoFeliz();
+        Agendamento? capturado = null;
+        _agendamentoRepoMock
+            .Setup(r => r.AddAsync(It.IsAny<Agendamento>()))
+            .Callback<Agendamento>(a => capturado = a)
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _sut.CriarAsync(BuildCreateDto());
+
+        // Assert -- m-1: DsOrigem SEMPRE explícito (nunca null -- NOT NULL DEFAULT 'PORTAL',
+        // e um NULL explícito no INSERT dá ORA-01400).
+        capturado.Should().NotBeNull();
+        capturado!.DsOrigem.Should().Be("RECEPCAO");
+        capturado.IdTriagemOrigem.Should().BeNull();
+        capturado.NrVersion.Should().Be(0);
+        capturado.IdClinica.Should().Be(1L, "IdClinica vem do IClinicaContext, nunca do corpo (o DTO nem declara o campo)");
+        capturado.StStatus.Should().Be("AGENDADO");
+        result.DsOrigem.Should().Be("RECEPCAO");
+    }
+
+    [Fact]
+    public async Task CriarAsync_ComTriagemOrigem_GravaOrigemTriagemLuna()
+    {
+        // Arrange -- F-3: a recepção agenda pelo card da triagem.
+        var triagem = new TriagemLuna
+        {
+            Id = 800,
+            IdClinica = 1,
+            IdTutor = 601,
+            DsNivelUrgencia = "ALTA",
+            DsDescricao = "SEGREDO-NAO-VAZA-NO-DTO"
+        };
+        SetupCaminhoFeliz(triagem);
+        Agendamento? capturado = null;
+        _agendamentoRepoMock
+            .Setup(r => r.AddAsync(It.IsAny<Agendamento>()))
+            .Callback<Agendamento>(a => capturado = a)
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _sut.CriarAsync(BuildCreateDto(idTriagemOrigem: 800));
+
+        // Assert
+        capturado.Should().NotBeNull();
+        capturado!.DsOrigem.Should().Be("TRIAGEM_LUNA");
+        capturado.IdTriagemOrigem.Should().Be(800L);
+        result.DsOrigem.Should().Be("TRIAGEM_LUNA");
+        result.DsNivelUrgenciaOrigem.Should().Be("ALTA");
+    }
+
+    [Fact]
+    public async Task CriarAsync_DuracaoAusente_UsaDefault30()
+    {
+        // Arrange -- mesmo default do Java (Agendamento.criar/.comDuracao).
+        SetupCaminhoFeliz();
+        Agendamento? capturado = null;
+        _agendamentoRepoMock
+            .Setup(r => r.AddAsync(It.IsAny<Agendamento>()))
+            .Callback<Agendamento>(a => capturado = a)
+            .Returns(Task.CompletedTask);
+
+        // Act
+        await _sut.CriarAsync(BuildCreateDto());
+
+        // Assert
+        capturado!.NrDuracaoMinutos.Should().Be(30);
+    }
 }
