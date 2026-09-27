@@ -14,6 +14,7 @@ public class AgendaServiceTests
     private readonly Mock<IAgendamentoRepository> _agendamentoRepoMock = new();
     private readonly Mock<IClinicaContext> _clinicaMock = new();
     private readonly Mock<IUnitOfWork> _uowMock = new();
+    private readonly Mock<IGeradorUrlFotoPet> _geradorUrlFotoPetMock = new();
     private readonly AgendaService _sut;
 
     public AgendaServiceTests()
@@ -25,7 +26,8 @@ public class AgendaServiceTests
             _readRepoMock.Object,
             _clinicaMock.Object,
             _agendamentoRepoMock.Object,
-            _uowMock.Object);
+            _uowMock.Object,
+            _geradorUrlFotoPetMock.Object);
     }
 
     private static DateTime Inicio => new(2026, 5, 6);

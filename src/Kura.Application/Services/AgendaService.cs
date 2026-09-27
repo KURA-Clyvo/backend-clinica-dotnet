@@ -5,6 +5,7 @@ using Kura.Application.Services.Interfaces;
 using Kura.CrossCutting.Observability;
 using Kura.Domain.Exceptions;
 using Kura.Domain.Interfaces;
+using Kura.Domain.Storage;
 
 public sealed class AgendaService : IAgendaService
 {
@@ -12,6 +13,7 @@ public sealed class AgendaService : IAgendaService
     private readonly IAgendamentoRepository _agendamentoRepository;
     private readonly IClinicaContext _clinicaContext;
     private readonly IUnitOfWork _uow;
+    private readonly IGeradorUrlFotoPet _geradorUrlFotoPet;
 
     /// <summary>
     /// FD-06 — <b>máquina de estados de <c>AGENDAMENTO.ST_STATUS</c> do lado <c>.NET</c>.</b>
@@ -122,12 +124,14 @@ public sealed class AgendaService : IAgendaService
         IAgendamentoReadRepository readRepository,
         IClinicaContext clinicaContext,
         IAgendamentoRepository agendamentoRepository,
-        IUnitOfWork uow)
+        IUnitOfWork uow,
+        IGeradorUrlFotoPet geradorUrlFotoPet)
     {
         _readRepository = readRepository;
         _clinicaContext = clinicaContext;
         _agendamentoRepository = agendamentoRepository;
         _uow = uow;
+        _geradorUrlFotoPet = geradorUrlFotoPet;
     }
 
     public async Task<AgendaResponseDto> GetAgendaAsync(
@@ -192,7 +196,7 @@ public sealed class AgendaService : IAgendaService
         return ToItemDto(agendamento);
     }
 
-    private static AgendamentoItemDto ToItemDto(Domain.Entities.Agendamento a) => new()
+    private AgendamentoItemDto ToItemDto(Domain.Entities.Agendamento a) => new()
     {
         IdAgendamento = a.Id,
         DtAgendamento = a.DtAgendamento,
@@ -203,6 +207,63 @@ public sealed class AgendaService : IAgendaService
         NmVeterinario = a.Veterinario?.NmVeterinario ?? string.Empty,
         DsTipoConsulta = a.DsTipoConsulta ?? string.Empty,
         DsStatus = a.StStatus ?? string.Empty,
-        NrVersion = a.NrVersion
+        NrVersion = a.NrVersion,
+        IdPet = a.IdPet,
+        IdTutor = a.IdTutor,
+        DtCheckin = a.DtCheckin,
+        DtInicioAtendimento = a.DtInicioAtendimento,
+        DsOrigem = a.DsOrigem,
+        // A-7: DsNivelUrgenciaOrigem só existe quando TriagemOrigem foi carregada pelo
+        // Include — e o HasQueryFilter de TriagemLuna (KuraDbContext) já garante que uma
+        // triagem de outra clínica nunca chega aqui (fica null, não a linha errada).
+        DsNivelUrgenciaOrigem = a.TriagemOrigem?.DsNivelUrgencia,
+        DsRespostaConfirmacao = a.DsRespostaConfirmacao,
+        DsEtapaRecepcao = CalcularEtapaRecepcao(a.StStatus, a.DtCheckin, a.DtInicioAtendimento),
+        DsFotoThumbUrl = _geradorUrlFotoPet.GerarUrl(a.Pet?.DsFotoChave, ChaveFotoPet.SufixoThumb)
     };
+
+    /// <summary>
+    /// A-3 — deriva a etapa de recepção NO SERVIDOR, num lugar só. Função pura (sem I/O,
+    /// sem dependência de infraestrutura), testável diretamente por tabela-verdade
+    /// (aceite (a) da REC-09). Reaproveita <see cref="StatusFinais"/> — a mesma fonte de
+    /// verdade que bloqueia transições terminais em <see cref="AtualizarStatusAsync"/> —
+    /// em vez de duplicar a lista de estados terminais (regra de ouro v7: inventário à
+    /// mão apodrece em silêncio).
+    ///
+    /// <para><b>Precedência (da mais forte para a mais fraca), medida contra o desenho da
+    /// REC-09 (A-3):</b></para>
+    /// <list type="number">
+    ///   <item><description><b>Status terminal</b> (<see cref="StatusFinais"/>) —
+    ///   <c>REALIZADO</c> vira <c>FINALIZADO</c> para a recepção; <c>CANCELADO</c> e
+    ///   <c>NAO_COMPARECEU</c> mantêm o próprio nome. Este passo vem ANTES dos timestamps
+    ///   de propósito: um check-in tardio batido num agendamento já cancelado não pode
+    ///   reabrir a etapa (aceite explícito da REC-09) — <c>DsEtapaRecepcao</c> reflete o
+    ///   destino da máquina de estados, não o relógio de operação.</description></item>
+    ///   <item><description><c>DT_INICIO_ATENDIMENTO</c> presente ⇒
+    ///   <c>EM_ATENDIMENTO</c>. Cobre também o walk-in que entra direto sem check-in
+    ///   prévio ("início sem check-in", aceite explícito da REC-09) — não exige
+    ///   <c>DT_CHECKIN</c> preenchido.</description></item>
+    ///   <item><description><c>DT_CHECKIN</c> presente (e sem início de atendimento) ⇒
+    ///   <c>CHEGOU</c>.</description></item>
+    ///   <item><description>Nenhum dos anteriores: o próprio <c>ST_STATUS</c> —
+    ///   <c>CONFIRMADO</c> permanece <c>CONFIRMADO</c>; qualquer outro estado
+    ///   não-terminal (inclui <c>AGENDADO</c> e o defensivo <c>INTENCAO</c>, que a FD-06
+    ///   documenta como inalcançável em produção — nenhum backend grava essa
+    ///   origem) cai em <c>AGENDADO</c>.</description></item>
+    /// </list>
+    /// </summary>
+    public static string CalcularEtapaRecepcao(
+        string? stStatus, DateTime? dtCheckin, DateTime? dtInicioAtendimento)
+    {
+        if (stStatus is not null && StatusFinais.Contains(stStatus))
+            return stStatus == "REALIZADO" ? "FINALIZADO" : stStatus;
+
+        if (dtInicioAtendimento.HasValue)
+            return "EM_ATENDIMENTO";
+
+        if (dtCheckin.HasValue)
+            return "CHEGOU";
+
+        return stStatus == "CONFIRMADO" ? "CONFIRMADO" : "AGENDADO";
+    }
 }
