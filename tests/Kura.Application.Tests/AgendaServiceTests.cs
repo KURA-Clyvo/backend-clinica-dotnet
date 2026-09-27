@@ -555,4 +555,76 @@ public class AgendaServiceTests
         // Assert
         result.Agendamentos[0].DsFotoThumbUrl.Should().BeNull();
     }
+
+    // ---------- G2/I-1: projeção completa dos 9 campos novos ----------
+
+    /// <summary>
+    /// G2 (I-1, Important) — o aceite (b) da REC-09 provava a navegação
+    /// <c>TriagemOrigem</c> no REPOSITÓRIO (InMemory), mas nenhum teste do SERVICE montava um
+    /// <c>Agendamento</c> com os 9 campos novos preenchidos e conferia o DTO campo a campo. A
+    /// G2 mostrou 2 mutações que ficavam verdes: <c>DsNivelUrgenciaOrigem</c> lendo
+    /// <c>DS_DESCRICAO</c> (texto livre da conversa do tutor com a Luna, dado clínico) em vez
+    /// de <c>DS_NIVEL_URGENCIA</c>, e <c>DsRespostaConfirmacao</c> zerado. Este teste usa
+    /// <c>DsNivelUrgencia</c> e <c>DsDescricao</c> DIFERENTES de propósito na triagem de
+    /// origem — se o service trocar um pelo outro, a asserção de valor pega.
+    /// </summary>
+    [Fact]
+    public async Task GetAgendaAsync_AgendamentoTotalmentePreenchido_ProjetaOsNoveCamposNovosUmAUm()
+    {
+        // Arrange
+        var triagemOrigem = new TriagemLuna
+        {
+            Id = 800,
+            IdClinica = 1, // mesma clínica do agendamento -- não é o cenário do aceite (b)
+            DsNivelUrgencia = "ALTA",
+            DsDescricao = "Vômito recorrente há 2 dias, sem apetite", // DIFERENTE de DsNivelUrgencia de propósito
+            DtTriagem = Inicio.AddDays(-1)
+        };
+        var agendamentos = new List<Agendamento>
+        {
+            new()
+            {
+                Id = 77,
+                IdClinica = 1,
+                IdPet = 501,
+                IdTutor = 601,
+                IdVeterinario = 10,
+                DtAgendamento = Inicio.AddHours(9),
+                NrDuracaoMinutos = 30,
+                DsTipoConsulta = "Consulta",
+                StStatus = "CONFIRMADO",
+                NrVersion = 3,
+                StAtiva = true,
+                DsOrigem = "TRIAGEM_LUNA",
+                DtCheckin = Inicio.AddHours(8).AddMinutes(55),
+                DtInicioAtendimento = null,
+                IdTriagemOrigem = 800,
+                DsRespostaConfirmacao = "SIM",
+                TriagemOrigem = triagemOrigem,
+                Pet = new Pet { Id = 501, NmPet = "Rex", IdClinica = 1, IdEspecie = 1, DsFotoChave = "clinica/1/pet/501/abc.webp" },
+                Tutor = new Tutor { Id = 601, NmTutor = "João" },
+                Veterinario = new Veterinario { Id = 10, NmVeterinario = "Dr. Ana", IdClinica = 1, NrCrmv = "1234" }
+            }
+        };
+        _readRepoMock.Setup(r => r.GetByIntervaloAsync(1L, Inicio, Fim, null))
+            .ReturnsAsync(agendamentos);
+        _geradorUrlFotoPetMock
+            .Setup(g => g.GerarUrl("clinica/1/pet/501/abc.webp", Kura.Domain.Storage.ChaveFotoPet.SufixoThumb))
+            .Returns("https://kura.example/api/v1/fotos/clinica/1/pet/501/abc_256.webp?exp=1&sig=xyz");
+
+        // Act
+        var result = await _sut.GetAgendaAsync(Inicio, Fim, null);
+
+        // Assert -- os 9 campos novos, um a um.
+        var item = result.Agendamentos[0];
+        item.IdPet.Should().Be(501);
+        item.IdTutor.Should().Be(601);
+        item.DtCheckin.Should().Be(Inicio.AddHours(8).AddMinutes(55));
+        item.DtInicioAtendimento.Should().BeNull();
+        item.DsOrigem.Should().Be("TRIAGEM_LUNA");
+        item.DsNivelUrgenciaOrigem.Should().Be("ALTA", "tem que ler DS_NIVEL_URGENCIA, nunca DS_DESCRICAO (dado clínico livre)");
+        item.DsRespostaConfirmacao.Should().Be("SIM");
+        item.DsEtapaRecepcao.Should().Be("CHEGOU"); // CONFIRMADO + checkin, sem início
+        item.DsFotoThumbUrl.Should().Be("https://kura.example/api/v1/fotos/clinica/1/pet/501/abc_256.webp?exp=1&sig=xyz");
+    }
 }
