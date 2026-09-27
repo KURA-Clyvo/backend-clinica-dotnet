@@ -140,7 +140,8 @@ public class AgendaServiceTests
         string stStatus = "CONFIRMADO",
         long version = 2,
         DateTime? dtAgendamento = null,
-        DateTime? dtCheckin = null) => new()
+        DateTime? dtCheckin = null,
+        DateTime? dtInicioAtendimento = null) => new()
     {
         Id = 10,
         IdClinica = 1,
@@ -148,6 +149,7 @@ public class AgendaServiceTests
         NrVersion = version,
         DtAgendamento = dtAgendamento ?? default,
         DtCheckin = dtCheckin,
+        DtInicioAtendimento = dtInicioAtendimento,
         StAtiva = true
     };
 
@@ -248,8 +250,20 @@ public class AgendaServiceTests
     public async Task AtualizarStatusAsync_TransicaoPermitida_Persiste(string origem, string destino)
     {
         // Arrange
-        var agendamento = AgendamentoAtivo(stStatus: origem, version: 2);
+        //
+        // G2 REC-11 (m-4): os casos "*, NAO_COMPARECEU" precisam de DtAgendamento/relógio
+        // EXPLÍCITOS (agendamento no passado, relógio depois dele) -- sem isto, os dois passavam
+        // por COINCIDÊNCIA (AgendamentoAtivo() default = 0001-01-01 == _relogioClinicaMock sem
+        // setup, que também devolve default(DateTime)), não por exercitar de fato "depois do
+        // horário marcado". A G2 provou a coincidência mutando `<` para `<=` (MC): os dois casos
+        // falhavam junto com o teste de borda, um sinal que não vinha do comportamento real.
+        var agendamento = AgendamentoAtivo(
+            stStatus: origem,
+            version: 2,
+            dtAgendamento: destino == "NAO_COMPARECEU" ? new DateTime(2026, 10, 7, 10, 0, 0) : null);
         _agendamentoRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync(agendamento);
+        if (destino == "NAO_COMPARECEU")
+            _relogioClinicaMock.Setup(r => r.Agora()).Returns(new DateTime(2026, 10, 7, 11, 0, 0));
 
         var dto = new AtualizarStatusAgendamentoDto { DsStatus = destino, NrVersion = 2 };
 
@@ -1045,6 +1059,39 @@ public class AgendaServiceTests
         _uowMock.Verify(u => u.CommitAsync(), Times.Never);
     }
 
+    /// <summary>
+    /// G2 REC-11 (I-1, Important) — a guarda original olhava só <c>DtCheckin</c>. Um walk-in que
+    /// entra direto (<c>IniciarAtendimentoAsync</c> sem check-in prévio, aceite explícito da
+    /// REC-11) tem <c>DtInicioAtendimento</c> preenchido e <c>DtCheckin</c> nulo -- e a G2 mediu
+    /// (S5) que isso passava pela guarda antiga e virava <c>NAO_COMPARECEU</c> com 200. Quem está
+    /// sendo atendido não faltou, com mais razão ainda do que quem só chegou.
+    /// </summary>
+    [Fact]
+    public async Task AtualizarStatusAsync_Falta_QuandoJaIniciouAtendimentoSemCheckin_LancaRegraDeNegocio()
+    {
+        // Arrange -- walk-in: início registrado, SEM check-in. Horário já passou (não é o
+        // motivo da recusa -- a recusa é por "já foi atendido", testado isoladamente).
+        var agendamento = AgendamentoAtivo(
+            stStatus: "AGENDADO",
+            version: 0,
+            dtAgendamento: new DateTime(2026, 10, 7, 10, 0, 0),
+            dtInicioAtendimento: new DateTime(2026, 10, 7, 10, 5, 0));
+        _agendamentoRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync(agendamento);
+        _relogioClinicaMock.Setup(r => r.Agora()).Returns(new DateTime(2026, 10, 7, 11, 0, 0));
+
+        var dto = new AtualizarStatusAgendamentoDto { DsStatus = "NAO_COMPARECEU", NrVersion = 0 };
+
+        // Act
+        var act = async () => await _sut.AtualizarStatusAsync(10L, dto);
+
+        // Assert
+        var ex = await act.Should().ThrowAsync<RegraDeNegocioException>();
+        ex.Which.Message.Should().Contain("início de atendimento");
+        agendamento.StStatus.Should().Be("AGENDADO");
+        agendamento.DtCheckin.Should().BeNull("o walk-in nunca teve check-in -- a guarda tem que reagir ao início, não a ele");
+        _uowMock.Verify(u => u.CommitAsync(), Times.Never);
+    }
+
     [Fact]
     public async Task AtualizarStatusAsync_Cancelar_NaoAplicaGuardaDeFalta()
     {
@@ -1102,9 +1149,12 @@ public class AgendaServiceTests
     [Fact]
     public async Task CheckinAsync_VersaoDesatualizada_LancaConflitoConcorrencia_SemMudarALinha()
     {
-        // Arrange
-        var agendamento = AgendamentoAtivo(stStatus: "AGENDADO", version: 5);
+        // Arrange -- data explícita (mesmo dia do relógio): a versão velha precisa passar pela
+        // guarda de data (G2/m-2) para exercitar de fato o conflito de versão, não coincidência.
+        var agendamento = AgendamentoAtivo(
+            stStatus: "AGENDADO", version: 5, dtAgendamento: new DateTime(2026, 10, 7, 9, 0, 0));
         _agendamentoRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync(agendamento);
+        _relogioClinicaMock.Setup(r => r.Hoje()).Returns(new DateTime(2026, 10, 7));
 
         // Act -- versão velha (3, linha está em 5).
         var act = async () => await _sut.CheckinAsync(10L, new RegistrarEventoRecepcaoDto { NrVersion = 3 });
@@ -1120,10 +1170,12 @@ public class AgendaServiceTests
     public async Task CheckinAsync_CaminhoFeliz_GravaDtCheckinDoRelogioEIncrementaVersao()
     {
         // Arrange
-        var agendamento = AgendamentoAtivo(stStatus: "AGENDADO", version: 0);
+        var agendamento = AgendamentoAtivo(
+            stStatus: "AGENDADO", version: 0, dtAgendamento: new DateTime(2026, 10, 7, 9, 0, 0));
         _agendamentoRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync(agendamento);
         var agora = new DateTime(2026, 10, 7, 9, 5, 0);
         _relogioClinicaMock.Setup(r => r.Agora()).Returns(agora);
+        _relogioClinicaMock.Setup(r => r.Hoje()).Returns(agora.Date);
 
         // Act
         var result = await _sut.CheckinAsync(10L, new RegistrarEventoRecepcaoDto { NrVersion = 0 });
@@ -1141,8 +1193,10 @@ public class AgendaServiceTests
     public async Task CheckinAsync_Idempotente_SegundoCheckinDevolveHorarioDoPrimeiro_SemIncrementarVersao()
     {
         // Arrange -- relógio avança ENTRE as duas chamadas.
-        var agendamento = AgendamentoAtivo(stStatus: "AGENDADO", version: 0);
+        var agendamento = AgendamentoAtivo(
+            stStatus: "AGENDADO", version: 0, dtAgendamento: new DateTime(2026, 10, 7, 9, 0, 0));
         _agendamentoRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync(agendamento);
+        _relogioClinicaMock.Setup(r => r.Hoje()).Returns(new DateTime(2026, 10, 7));
         var primeiroHorario = new DateTime(2026, 10, 7, 9, 5, 0);
         _relogioClinicaMock.Setup(r => r.Agora()).Returns(primeiroHorario);
 
@@ -1157,6 +1211,132 @@ public class AgendaServiceTests
         segundo.DtCheckin.Should().Be(primeiroHorario);
         segundo.NrVersion.Should().Be(primeiro.NrVersion);
         _uowMock.Verify(u => u.CommitAsync(), Times.Once, "o 2º check-in não escreve nada");
+    }
+
+    /// <summary>
+    /// G2 REC-11 (m-6). Retry de rede: o app reenvia o MESMO request (mesma versão ORIGINAL,
+    /// já velha depois do 1º commit) — cenário diferente do idempotente acima, que manda a
+    /// versão NOVA devolvida pela 1ª resposta. Sem este teste, mover a checagem de versão para
+    /// ANTES do ramo idempotente (mutações ME/MF da G2) fica verde: aqui, a 2ª chamada usa
+    /// <c>NrVersion = 0</c> (a original) enquanto a linha já está em 1.
+    /// </summary>
+    [Fact]
+    public async Task CheckinAsync_Retry_ComVersaoOriginalJaVelha_Devolve200ComMesmoHorarioSemConflito()
+    {
+        // Arrange
+        var agendamento = AgendamentoAtivo(
+            stStatus: "AGENDADO", version: 0, dtAgendamento: new DateTime(2026, 10, 7, 9, 0, 0));
+        _agendamentoRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync(agendamento);
+        _relogioClinicaMock.Setup(r => r.Hoje()).Returns(new DateTime(2026, 10, 7));
+        var horario = new DateTime(2026, 10, 7, 9, 5, 0);
+        _relogioClinicaMock.Setup(r => r.Agora()).Returns(horario);
+        var dtoOriginal = new RegistrarEventoRecepcaoDto { NrVersion = 0 };
+
+        // Act -- 1ª chamada grava (versão 0 -> 1); retry manda o MESMO dto (versão 0, já velha).
+        var primeiro = await _sut.CheckinAsync(10L, dtoOriginal);
+        var retry = await _sut.CheckinAsync(10L, dtoOriginal);
+
+        // Assert
+        retry.DtCheckin.Should().Be(horario);
+        retry.NrVersion.Should().Be(primeiro.NrVersion);
+        _uowMock.Verify(u => u.CommitAsync(), Times.Once, "o retry não pode escrever de novo");
+    }
+
+    /// <summary>G2 REC-11 (m-1) — check-in DEPOIS de início de atendimento é recusado: a espera
+    /// por linha (A-6) não pode sair negativa (<c>DT_CHECKIN &gt; DT_INICIO_ATENDIMENTO</c>).</summary>
+    [Fact]
+    public async Task CheckinAsync_DepoisDeInicioAtendimento_LancaRegraDeNegocio()
+    {
+        // Arrange -- walk-in que já começou o atendimento, sem check-in prévio.
+        var agendamento = AgendamentoAtivo(
+            stStatus: "AGENDADO", version: 1, dtInicioAtendimento: new DateTime(2026, 10, 7, 9, 5, 0));
+        _agendamentoRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync(agendamento);
+
+        // Act
+        var act = async () => await _sut.CheckinAsync(10L, new RegistrarEventoRecepcaoDto { NrVersion = 1 });
+
+        // Assert
+        var ex = await act.Should().ThrowAsync<RegraDeNegocioException>();
+        ex.Which.Message.Should().Contain("início de atendimento");
+        agendamento.DtCheckin.Should().BeNull();
+        _uowMock.Verify(u => u.CommitAsync(), Times.Never);
+    }
+
+    // ---------- REC-11 (G2/m-2): check-in/início só no DIA do agendamento ----------
+
+    [Fact]
+    public async Task CheckinAsync_AgendamentoDeAmanha_LancaRegraDeNegocio()
+    {
+        // Arrange
+        var agendamento = AgendamentoAtivo(
+            stStatus: "AGENDADO", version: 0, dtAgendamento: new DateTime(2026, 10, 8, 10, 0, 0));
+        _agendamentoRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync(agendamento);
+        _relogioClinicaMock.Setup(r => r.Hoje()).Returns(new DateTime(2026, 10, 7));
+
+        // Act
+        var act = async () => await _sut.CheckinAsync(10L, new RegistrarEventoRecepcaoDto { NrVersion = 0 });
+
+        // Assert
+        await act.Should().ThrowAsync<RegraDeNegocioException>();
+        agendamento.DtCheckin.Should().BeNull();
+        _uowMock.Verify(u => u.CommitAsync(), Times.Never);
+    }
+
+    [Fact]
+    public async Task CheckinAsync_AgendamentoDeOntem_LancaRegraDeNegocio()
+    {
+        // Arrange
+        var agendamento = AgendamentoAtivo(
+            stStatus: "AGENDADO", version: 0, dtAgendamento: new DateTime(2026, 10, 6, 10, 0, 0));
+        _agendamentoRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync(agendamento);
+        _relogioClinicaMock.Setup(r => r.Hoje()).Returns(new DateTime(2026, 10, 7));
+
+        // Act
+        var act = async () => await _sut.CheckinAsync(10L, new RegistrarEventoRecepcaoDto { NrVersion = 0 });
+
+        // Assert
+        await act.Should().ThrowAsync<RegraDeNegocioException>();
+        agendamento.DtCheckin.Should().BeNull();
+    }
+
+    /// <summary>Boundary do dia (G2/m-2): 23:59 do próprio dia ainda é hoje -- check-in permitido.</summary>
+    [Fact]
+    public async Task CheckinAsync_MesmoDiaAs2359_Permite()
+    {
+        // Arrange
+        var agendamento = AgendamentoAtivo(
+            stStatus: "AGENDADO", version: 0, dtAgendamento: new DateTime(2026, 10, 7, 10, 0, 0));
+        _agendamentoRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync(agendamento);
+        var agora = new DateTime(2026, 10, 7, 23, 59, 0);
+        _relogioClinicaMock.Setup(r => r.Agora()).Returns(agora);
+        _relogioClinicaMock.Setup(r => r.Hoje()).Returns(agora.Date);
+
+        // Act
+        var result = await _sut.CheckinAsync(10L, new RegistrarEventoRecepcaoDto { NrVersion = 0 });
+
+        // Assert
+        result.DtCheckin.Should().Be(agora);
+    }
+
+    /// <summary>Boundary do dia (G2/m-2): 00:00 do dia seguinte já não é mais o dia do
+    /// agendamento -- recusado, mesmo passados só segundos da virada.</summary>
+    [Fact]
+    public async Task CheckinAsync_LogoAposMeiaNoite_NaoPermiteAgendamentoDeOntem()
+    {
+        // Arrange
+        var agendamento = AgendamentoAtivo(
+            stStatus: "AGENDADO", version: 0, dtAgendamento: new DateTime(2026, 10, 7, 23, 50, 0));
+        _agendamentoRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync(agendamento);
+        var agora = new DateTime(2026, 10, 8, 0, 0, 5);
+        _relogioClinicaMock.Setup(r => r.Agora()).Returns(agora);
+        _relogioClinicaMock.Setup(r => r.Hoje()).Returns(agora.Date);
+
+        // Act
+        var act = async () => await _sut.CheckinAsync(10L, new RegistrarEventoRecepcaoDto { NrVersion = 0 });
+
+        // Assert
+        await act.Should().ThrowAsync<RegraDeNegocioException>();
+        agendamento.DtCheckin.Should().BeNull();
     }
 
     // ---------- REC-11: IniciarAtendimentoAsync ----------
@@ -1197,9 +1377,11 @@ public class AgendaServiceTests
     [Fact]
     public async Task IniciarAtendimentoAsync_VersaoDesatualizada_LancaConflitoConcorrencia()
     {
-        // Arrange
-        var agendamento = AgendamentoAtivo(stStatus: "CONFIRMADO", version: 5);
+        // Arrange -- data explícita (mesmo dia do relógio), mesmo raciocínio do check-in.
+        var agendamento = AgendamentoAtivo(
+            stStatus: "CONFIRMADO", version: 5, dtAgendamento: new DateTime(2026, 10, 7, 9, 0, 0));
         _agendamentoRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync(agendamento);
+        _relogioClinicaMock.Setup(r => r.Hoje()).Returns(new DateTime(2026, 10, 7));
 
         // Act
         var act = async () => await _sut.IniciarAtendimentoAsync(10L, new RegistrarEventoRecepcaoDto { NrVersion = 3 });
@@ -1214,10 +1396,12 @@ public class AgendaServiceTests
     public async Task IniciarAtendimentoAsync_SemCheckinPrevio_NaoInventaDtCheckinEIncrementaVersao()
     {
         // Arrange -- walk-in: entra direto, sem check-in.
-        var agendamento = AgendamentoAtivo(stStatus: "AGENDADO", version: 0, dtCheckin: null);
+        var agendamento = AgendamentoAtivo(
+            stStatus: "AGENDADO", version: 0, dtCheckin: null, dtAgendamento: new DateTime(2026, 10, 7, 9, 0, 0));
         _agendamentoRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync(agendamento);
         var agora = new DateTime(2026, 10, 7, 9, 10, 0);
         _relogioClinicaMock.Setup(r => r.Agora()).Returns(agora);
+        _relogioClinicaMock.Setup(r => r.Hoje()).Returns(agora.Date);
 
         // Act
         var result = await _sut.IniciarAtendimentoAsync(10L, new RegistrarEventoRecepcaoDto { NrVersion = 0 });
@@ -1235,10 +1419,12 @@ public class AgendaServiceTests
     {
         // Arrange
         var checkin = new DateTime(2026, 10, 7, 9, 0, 0);
-        var agendamento = AgendamentoAtivo(stStatus: "AGENDADO", version: 1, dtCheckin: checkin);
+        var agendamento = AgendamentoAtivo(
+            stStatus: "AGENDADO", version: 1, dtCheckin: checkin, dtAgendamento: new DateTime(2026, 10, 7, 9, 0, 0));
         _agendamentoRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync(agendamento);
         var agora = new DateTime(2026, 10, 7, 9, 10, 0);
         _relogioClinicaMock.Setup(r => r.Agora()).Returns(agora);
+        _relogioClinicaMock.Setup(r => r.Hoje()).Returns(agora.Date);
 
         // Act
         var result = await _sut.IniciarAtendimentoAsync(10L, new RegistrarEventoRecepcaoDto { NrVersion = 1 });
@@ -1253,8 +1439,10 @@ public class AgendaServiceTests
     public async Task IniciarAtendimentoAsync_Idempotente_SegundaChamadaNaoAlteraNemIncrementaVersao()
     {
         // Arrange
-        var agendamento = AgendamentoAtivo(stStatus: "AGENDADO", version: 0);
+        var agendamento = AgendamentoAtivo(
+            stStatus: "AGENDADO", version: 0, dtAgendamento: new DateTime(2026, 10, 7, 9, 0, 0));
         _agendamentoRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync(agendamento);
+        _relogioClinicaMock.Setup(r => r.Hoje()).Returns(new DateTime(2026, 10, 7));
         var primeiroHorario = new DateTime(2026, 10, 7, 9, 10, 0);
         _relogioClinicaMock.Setup(r => r.Agora()).Returns(primeiroHorario);
 
@@ -1269,5 +1457,103 @@ public class AgendaServiceTests
         segundo.DtInicioAtendimento.Should().Be(primeiroHorario);
         segundo.NrVersion.Should().Be(primeiro.NrVersion);
         _uowMock.Verify(u => u.CommitAsync(), Times.Once);
+    }
+
+    /// <summary>G2 REC-11 (m-6) — mesmo raciocínio do check-in: retry com a versão ORIGINAL (já
+    /// velha) precisa continuar idempotente. Sem isto, mover a checagem de versão para ANTES do
+    /// ramo idempotente (mutação ME da G2) fica verde.</summary>
+    [Fact]
+    public async Task IniciarAtendimentoAsync_Retry_ComVersaoOriginalJaVelha_Devolve200SemConflito()
+    {
+        // Arrange
+        var agendamento = AgendamentoAtivo(
+            stStatus: "AGENDADO", version: 0, dtAgendamento: new DateTime(2026, 10, 7, 9, 0, 0));
+        _agendamentoRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync(agendamento);
+        _relogioClinicaMock.Setup(r => r.Hoje()).Returns(new DateTime(2026, 10, 7));
+        var horario = new DateTime(2026, 10, 7, 9, 10, 0);
+        _relogioClinicaMock.Setup(r => r.Agora()).Returns(horario);
+        var dtoOriginal = new RegistrarEventoRecepcaoDto { NrVersion = 0 };
+
+        // Act
+        var primeiro = await _sut.IniciarAtendimentoAsync(10L, dtoOriginal);
+        var retry = await _sut.IniciarAtendimentoAsync(10L, dtoOriginal);
+
+        // Assert
+        retry.DtInicioAtendimento.Should().Be(horario);
+        retry.NrVersion.Should().Be(primeiro.NrVersion);
+        _uowMock.Verify(u => u.CommitAsync(), Times.Once);
+    }
+
+    // ---------- REC-11 (G2/m-2): início só no DIA do agendamento ----------
+
+    [Fact]
+    public async Task IniciarAtendimentoAsync_AgendamentoDeAmanha_LancaRegraDeNegocio()
+    {
+        // Arrange
+        var agendamento = AgendamentoAtivo(
+            stStatus: "AGENDADO", version: 0, dtAgendamento: new DateTime(2026, 10, 8, 10, 0, 0));
+        _agendamentoRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync(agendamento);
+        _relogioClinicaMock.Setup(r => r.Hoje()).Returns(new DateTime(2026, 10, 7));
+
+        // Act
+        var act = async () => await _sut.IniciarAtendimentoAsync(10L, new RegistrarEventoRecepcaoDto { NrVersion = 0 });
+
+        // Assert
+        await act.Should().ThrowAsync<RegraDeNegocioException>();
+        agendamento.DtInicioAtendimento.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task IniciarAtendimentoAsync_AgendamentoDeOntem_LancaRegraDeNegocio()
+    {
+        // Arrange
+        var agendamento = AgendamentoAtivo(
+            stStatus: "AGENDADO", version: 0, dtAgendamento: new DateTime(2026, 10, 6, 10, 0, 0));
+        _agendamentoRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync(agendamento);
+        _relogioClinicaMock.Setup(r => r.Hoje()).Returns(new DateTime(2026, 10, 7));
+
+        // Act
+        var act = async () => await _sut.IniciarAtendimentoAsync(10L, new RegistrarEventoRecepcaoDto { NrVersion = 0 });
+
+        // Assert
+        await act.Should().ThrowAsync<RegraDeNegocioException>();
+        agendamento.DtInicioAtendimento.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task IniciarAtendimentoAsync_MesmoDiaAs2359_Permite()
+    {
+        // Arrange
+        var agendamento = AgendamentoAtivo(
+            stStatus: "AGENDADO", version: 0, dtAgendamento: new DateTime(2026, 10, 7, 10, 0, 0));
+        _agendamentoRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync(agendamento);
+        var agora = new DateTime(2026, 10, 7, 23, 59, 0);
+        _relogioClinicaMock.Setup(r => r.Agora()).Returns(agora);
+        _relogioClinicaMock.Setup(r => r.Hoje()).Returns(agora.Date);
+
+        // Act
+        var result = await _sut.IniciarAtendimentoAsync(10L, new RegistrarEventoRecepcaoDto { NrVersion = 0 });
+
+        // Assert
+        result.DtInicioAtendimento.Should().Be(agora);
+    }
+
+    [Fact]
+    public async Task IniciarAtendimentoAsync_LogoAposMeiaNoite_NaoPermiteAgendamentoDeOntem()
+    {
+        // Arrange
+        var agendamento = AgendamentoAtivo(
+            stStatus: "AGENDADO", version: 0, dtAgendamento: new DateTime(2026, 10, 7, 23, 50, 0));
+        _agendamentoRepoMock.Setup(r => r.GetByIdAsync(10L, 1L)).ReturnsAsync(agendamento);
+        var agora = new DateTime(2026, 10, 8, 0, 0, 5);
+        _relogioClinicaMock.Setup(r => r.Agora()).Returns(agora);
+        _relogioClinicaMock.Setup(r => r.Hoje()).Returns(agora.Date);
+
+        // Act
+        var act = async () => await _sut.IniciarAtendimentoAsync(10L, new RegistrarEventoRecepcaoDto { NrVersion = 0 });
+
+        // Assert
+        await act.Should().ThrowAsync<RegraDeNegocioException>();
+        agendamento.DtInicioAtendimento.Should().BeNull();
     }
 }

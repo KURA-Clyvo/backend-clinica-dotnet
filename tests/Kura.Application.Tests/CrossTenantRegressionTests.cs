@@ -324,6 +324,10 @@ public class CrossTenantRegressionTests
 
         var relogioMock = new Mock<IRelogioClinica>();
         relogioMock.Setup(r => r.Agora()).Returns(agora);
+        // G2 REC-11 (m-2): a guarda de data compara com Hoje(), não com Agora() -- sem este
+        // setup, o mock devolveria default(DateTime) e a guarda recusaria com 422 todo teste
+        // que semeia DtAgendamento num dia real (2026-10-01).
+        relogioMock.Setup(r => r.Hoje()).Returns(agora.Date);
 
         return new AgendaService(
             new Mock<IAgendamentoReadRepository>().Object,

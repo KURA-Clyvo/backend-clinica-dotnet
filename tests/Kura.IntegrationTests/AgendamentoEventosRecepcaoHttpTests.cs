@@ -65,6 +65,7 @@ public class AgendamentoEventosRecepcaoHttpTests : IClassFixture<KuraApiFactory>
         long nrVersion = 0,
         DateTime? dtAgendamento = null,
         DateTime? dtCheckin = null,
+        DateTime? dtInicioAtendimento = null,
         long idClinica = KuraApiFactory.IdClinicaSemeada)
     {
         using var escopo = _factory.Services.CreateScope();
@@ -81,6 +82,7 @@ public class AgendamentoEventosRecepcaoHttpTests : IClassFixture<KuraApiFactory>
             StStatus = status,
             NrVersion = nrVersion,
             DtCheckin = dtCheckin,
+            DtInicioAtendimento = dtInicioAtendimento,
             StAtiva = true,
         });
 
@@ -393,5 +395,167 @@ public class AgendamentoEventosRecepcaoHttpTests : IClassFixture<KuraApiFactory>
         // Assert
         resposta.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
         (await LerAgendamentoAsync(id))!.StStatus.Should().Be("AGENDADO");
+    }
+
+    /// <summary>G2 REC-11 (I-1, Important) — walk-in atendido (início sem check-in) não pode
+    /// virar falta. Reproduz o S5 da G2 sobre HTTP real: início → PATCH NAO_COMPARECEU.</summary>
+    [Fact]
+    public async Task Falta_QuandoJaIniciouAtendimentoSemCheckin_Devolve422()
+    {
+        // Arrange
+        const long id = 9224;
+        await SemearAgendamentoAsync(id, "AGENDADO", nrVersion: 0);
+        var client = await ClienteAutenticadoAsync();
+
+        // Act -- walk-in: inicia direto, sem check-in.
+        var inicioResposta = await IniciarAtendimentoAsync(client, id, nrVersion: 0);
+        var inicioCorpo = await inicioResposta.Content.ReadFromJsonAsync<AgendamentoItemDto>();
+        var falta = await MarcarFaltaAsync(client, id, nrVersion: inicioCorpo!.NrVersion);
+
+        // Assert
+        falta.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        var persistido = await LerAgendamentoAsync(id);
+        persistido!.StStatus.Should().Be("AGENDADO");
+        persistido.DtInicioAtendimento.Should().NotBeNull();
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────
+    // G2/m-1 — check-in DEPOIS de início de atendimento é recusado.
+    // ───────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Checkin_DepoisDeInicioAtendimento_Devolve422SemGravarDtCheckin()
+    {
+        // Arrange -- walk-in: início primeiro (sem check-in).
+        const long id = 9231;
+        await SemearAgendamentoAsync(id, "AGENDADO", nrVersion: 0);
+        var client = await ClienteAutenticadoAsync();
+        var inicioResposta = await IniciarAtendimentoAsync(client, id, nrVersion: 0);
+        var inicioCorpo = await inicioResposta.Content.ReadFromJsonAsync<AgendamentoItemDto>();
+
+        // Act -- check-in tentado DEPOIS do início.
+        var resposta = await CheckinAsync(client, id, nrVersion: inicioCorpo!.NrVersion);
+
+        // Assert
+        resposta.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        var persistido = await LerAgendamentoAsync(id);
+        persistido!.DtCheckin.Should().BeNull("check-in depois do início inverteria a linha do tempo");
+        persistido.DtInicioAtendimento.Should().NotBeNull();
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────
+    // G2/m-2 — check-in e início só no DIA do agendamento.
+    // ───────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Checkin_AgendamentoDeAmanha_Devolve422()
+    {
+        // Arrange
+        const long id = 9241;
+        await SemearAgendamentoAsync(id, "AGENDADO", nrVersion: 0, dtAgendamento: AgoraSp().AddDays(1));
+        var client = await ClienteAutenticadoAsync();
+
+        // Act
+        var resposta = await CheckinAsync(client, id, nrVersion: 0);
+
+        // Assert
+        resposta.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        (await LerAgendamentoAsync(id))!.DtCheckin.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Checkin_AgendamentoDeOntem_Devolve422()
+    {
+        // Arrange
+        const long id = 9242;
+        await SemearAgendamentoAsync(id, "AGENDADO", nrVersion: 0, dtAgendamento: AgoraSp().AddDays(-1));
+        var client = await ClienteAutenticadoAsync();
+
+        // Act
+        var resposta = await CheckinAsync(client, id, nrVersion: 0);
+
+        // Assert
+        resposta.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        (await LerAgendamentoAsync(id))!.DtCheckin.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task IniciarAtendimento_AgendamentoDeAmanha_Devolve422()
+    {
+        // Arrange
+        const long id = 9243;
+        await SemearAgendamentoAsync(id, "AGENDADO", nrVersion: 0, dtAgendamento: AgoraSp().AddDays(1));
+        var client = await ClienteAutenticadoAsync();
+
+        // Act
+        var resposta = await IniciarAtendimentoAsync(client, id, nrVersion: 0);
+
+        // Assert
+        resposta.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        (await LerAgendamentoAsync(id))!.DtInicioAtendimento.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task IniciarAtendimento_AgendamentoDeOntem_Devolve422()
+    {
+        // Arrange
+        const long id = 9244;
+        await SemearAgendamentoAsync(id, "AGENDADO", nrVersion: 0, dtAgendamento: AgoraSp().AddDays(-1));
+        var client = await ClienteAutenticadoAsync();
+
+        // Act
+        var resposta = await IniciarAtendimentoAsync(client, id, nrVersion: 0);
+
+        // Assert
+        resposta.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        (await LerAgendamentoAsync(id))!.DtInicioAtendimento.Should().BeNull();
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────
+    // G2/m-6 — retry com a versão ORIGINAL (já velha): idempotente, não 409.
+    // ───────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Sem este teste, mover a checagem de versão para ANTES do ramo idempotente
+    /// (mutação MF da G2) fica verde -- os testes de idempotência existentes mandam a versão
+    /// NOVA (a que a 1ª resposta devolveu), nunca a original já velha.</summary>
+    [Fact]
+    public async Task Checkin_Retry_ComVersaoOriginalJaVelha_Devolve200ComMesmoHorarioSemConflito()
+    {
+        // Arrange
+        const long id = 9251;
+        await SemearAgendamentoAsync(id, "AGENDADO", nrVersion: 0);
+        var client = await ClienteAutenticadoAsync();
+
+        // Act -- 1ª chamada grava; retry manda o MESMO corpo (nrVersion=0, já velha).
+        var primeira = await CheckinAsync(client, id, nrVersion: 0);
+        var primeiroCorpo = await primeira.Content.ReadFromJsonAsync<AgendamentoItemDto>();
+        var retry = await CheckinAsync(client, id, nrVersion: 0);
+        var retryCorpo = await retry.Content.ReadFromJsonAsync<AgendamentoItemDto>();
+
+        // Assert
+        retry.StatusCode.Should().Be(HttpStatusCode.OK, "retry de rede não pode virar 409");
+        retryCorpo!.DtCheckin.Should().Be(primeiroCorpo!.DtCheckin);
+        retryCorpo.NrVersion.Should().Be(primeiroCorpo.NrVersion);
+    }
+
+    /// <summary>Mesmo raciocínio do check-in, para o início (mutação ME da G2).</summary>
+    [Fact]
+    public async Task IniciarAtendimento_Retry_ComVersaoOriginalJaVelha_Devolve200SemConflito()
+    {
+        // Arrange
+        const long id = 9252;
+        await SemearAgendamentoAsync(id, "AGENDADO", nrVersion: 0);
+        var client = await ClienteAutenticadoAsync();
+
+        // Act
+        var primeira = await IniciarAtendimentoAsync(client, id, nrVersion: 0);
+        var primeiroCorpo = await primeira.Content.ReadFromJsonAsync<AgendamentoItemDto>();
+        var retry = await IniciarAtendimentoAsync(client, id, nrVersion: 0);
+        var retryCorpo = await retry.Content.ReadFromJsonAsync<AgendamentoItemDto>();
+
+        // Assert
+        retry.StatusCode.Should().Be(HttpStatusCode.OK, "retry de rede não pode virar 409");
+        retryCorpo!.DtInicioAtendimento.Should().Be(primeiroCorpo!.DtInicioAtendimento);
+        retryCorpo.NrVersion.Should().Be(primeiroCorpo.NrVersion);
     }
 }

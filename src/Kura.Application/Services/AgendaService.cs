@@ -81,12 +81,18 @@ public sealed class AgendaService : IAgendaService
     /// </para>
     ///
     /// <para>
-    /// ⚠️ <b>Segunda lacuna conhecida e NÃO fechada aqui: não há guarda de data ao marcar falta.</b>
-    /// Um agendamento marcado como <c>NAO_COMPARECEU</c> antes da hora marcada é aceito por esta
-    /// máquina — «faltou» é sobre um compromisso que já passou, mas nada compara
-    /// <c>DtAgendamento</c> com o relógio. Fechar isso exige uma ruling (tolerância? o horário do
-    /// servidor ou o da clínica?) e mexe em fuso, que já mordeu este projeto; ficou fora do escopo
-    /// da FD-06 de propósito, e está registrado no relatório da task.
+    /// ✅ <b>Segunda lacuna — FECHADA pela REC-11 (era aberta na FD-06).</b> Um agendamento
+    /// marcado como <c>NAO_COMPARECEU</c> antes da hora marcada NÃO é mais aceito: a guarda em
+    /// <see cref="AtualizarStatusAsync"/> (bloco <c>if (dto.DsStatus == "NAO_COMPARECEU")</c>,
+    /// linhas 238-249 deste arquivo na fix wave da REC-11 — confira com
+    /// <c>grep -n "dto.DsStatus == \"NAO_COMPARECEU\""</c> antes de citar, regra 11 do
+    /// workspace: linha que anda com o arquivo) compara <c>DtAgendamento</c> com
+    /// <see cref="IRelogioClinica.Agora"/> (hora
+    /// local de SP, mesma convenção de A-5) e recusa com 422 quando o relógio ainda não chegou
+    /// lá. A mesma guarda também recusa quando já houve check-in OU início de atendimento (G2
+    /// REC-11, I-1). Semântica: "a partir do horário marcado", inclusiva (o instante exato já
+    /// aceita) — sem tolerância, porque nenhuma ruling de tolerância foi tomada; isso é
+    /// declarado, não um defeito pendente.
     /// </para>
     ///
     /// <para>
@@ -220,15 +226,23 @@ public sealed class AgendaService : IAgendaService
                 + $"só é possível ir para: {string.Join(", ", destinosPermitidos)}.");
 
         // REC-11 — fecha a lacuna declarada acima (linhas 83-90 da doc de TransicoesPermitidas):
-        // falta só existe DEPOIS do horário marcado e NUNCA depois de check-in (quem chegou não
-        // faltou). Guarda de negócio, então vem ANTES do conflito de versão — mesma ordem já
-        // estabelecida para "transição inválida precede conflito de versão".
+        // falta só existe DEPOIS do horário marcado e NUNCA depois de check-in OU início de
+        // atendimento (quem chegou -- ou já está sendo atendido -- não faltou). Guarda de
+        // negócio, então vem ANTES do conflito de versão — mesma ordem já estabelecida para
+        // "transição inválida precede conflito de versão".
+        //
+        // G2 REC-11 (I-1): a guarda original olhava só DtCheckin. Um walk-in que entra direto
+        // (IniciarAtendimentoAsync sem check-in prévio, aceite explícito da REC-11) tem
+        // DtInicioAtendimento preenchido e DtCheckin nulo -- e por isso passava por esta guarda
+        // e virava NAO_COMPARECEU com 200 (medido pela G2, S5). Quem está sendo atendido, com
+        // muito mais razão do que quem só chegou, não faltou.
         if (dto.DsStatus == "NAO_COMPARECEU")
         {
-            if (agendamento.DtCheckin.HasValue)
+            if (agendamento.DtCheckin.HasValue || agendamento.DtInicioAtendimento.HasValue)
                 throw new RegraDeNegocioException(
-                    $"Agendamento {id} já teve check-in registrado em "
-                    + $"{agendamento.DtCheckin:yyyy-MM-dd HH:mm} e não pode ser marcado como falta.");
+                    $"Agendamento {id} já teve check-in ou início de atendimento registrado "
+                    + $"({agendamento.DtCheckin:yyyy-MM-dd HH:mm}/{agendamento.DtInicioAtendimento:yyyy-MM-dd HH:mm}) "
+                    + "e não pode ser marcado como falta.");
 
             var agoraFalta = _relogioClinica.Agora();
             if (agoraFalta < agendamento.DtAgendamento)
@@ -385,11 +399,15 @@ public sealed class AgendaService : IAgendaService
     /// (<c>DT_CHECKIN</c>), nunca muda <c>ST_STATUS</c> (A-2).
     ///
     /// <para><b>Ordem das guardas</b> (mesmo raciocínio de <see cref="AtualizarStatusAsync"/>:
-    /// guarda de negócio antes de conflito de versão): (1) 404 se não achar, escopado por
-    /// <see cref="IClinicaContext"/> (A-7); (2) status fora de
+    /// guarda de negócio antes de conflito de versão), fixada na fix wave do G2 REC-11: (1) 404
+    /// se não achar, escopado por <see cref="IClinicaContext"/> (A-7); (2) status fora de
     /// <see cref="StatusElegiveisParaEventoRecepcao"/> ⇒ 422; (3) IDEMPOTÊNCIA — já tem
-    /// <c>DT_CHECKIN</c> ⇒ devolve o estado atual, sem checar versão (não há escrita, OCC não se
-    /// aplica); (4) versão divergente ⇒ 409; (5) grava
+    /// <c>DT_CHECKIN</c> ⇒ devolve o estado atual, SEM avaliar nenhuma guarda abaixo (não há
+    /// escrita, OCC/data/ordem não se aplicam a uma leitura); (4) G2/m-1 — já tem
+    /// <c>DT_INICIO_ATENDIMENTO</c> (walk-in que começou sem check-in) ⇒ 422, check-in depois do
+    /// início inverteria a linha do tempo e a espera por linha (A-6) sairia negativa; (5) G2/m-2
+    /// — <see cref="IRelogioClinica.Hoje"/> diferente do dia de <c>DtAgendamento</c> ⇒ 422
+    /// (nem véspera nem D+1: check-in só no dia certo); (6) versão divergente ⇒ 409; (7) grava
     /// <see cref="IRelogioClinica.Agora"/>, incrementa <c>NrVersion</c>, commita.</para>
     /// </summary>
     public async Task<AgendamentoItemDto> CheckinAsync(long id, RegistrarEventoRecepcaoDto dto)
@@ -406,6 +424,23 @@ public sealed class AgendaService : IAgendaService
         if (agendamento.DtCheckin.HasValue)
             return ToItemDto(agendamento);
 
+        // G2 REC-11 (m-1): sem isto, um walk-in que já começou o atendimento (sem check-in
+        // prévio, aceite legítimo da própria REC-11) podia "checar-in" DEPOIS do início --
+        // DT_CHECKIN > DT_INICIO_ATENDIMENTO, e a espera por linha (A-6) sairia negativa.
+        if (agendamento.DtInicioAtendimento.HasValue)
+            throw new RegraDeNegocioException(
+                $"Agendamento {id} já teve início de atendimento registrado em "
+                + $"{agendamento.DtInicioAtendimento:yyyy-MM-dd HH:mm} e não pode receber "
+                + "check-in depois disso.");
+
+        // G2 REC-11 (m-2): check-in só no DIA do agendamento -- nem véspera, nem D+1. Sem
+        // guarda nenhuma antes desta fix wave, um toque errado na linha de outro dia registrava
+        // chegada (S9 da G2: agendamento de daqui a 7 dias aceitava check-in).
+        if (_relogioClinica.Hoje() != agendamento.DtAgendamento.Date)
+            throw new RegraDeNegocioException(
+                $"Agendamento {id} está marcado para {agendamento.DtAgendamento:yyyy-MM-dd} "
+                + "e só pode receber check-in no dia do agendamento.");
+
         if (dto.NrVersion != agendamento.NrVersion)
             throw new ConflitoConcorrenciaException("Agendamento", id);
 
@@ -421,7 +456,8 @@ public sealed class AgendaService : IAgendaService
     /// REC-11 — <c>POST /api/v1/agendamentos/{id}/inicio-atendimento</c>. Registra o início do
     /// atendimento (<c>DT_INICIO_ATENDIMENTO</c>), permitido SEM check-in prévio (walk-in que
     /// entra direto) — este método nunca toca <c>DT_CHECKIN</c>. Mesma ordem de guardas de
-    /// <see cref="CheckinAsync"/>.
+    /// <see cref="CheckinAsync"/> (sem o m-1 -- não existe um "início depois de início" a
+    /// bloquear; a mesma guarda de data do G2/m-2 se aplica).
     /// </summary>
     public async Task<AgendamentoItemDto> IniciarAtendimentoAsync(long id, RegistrarEventoRecepcaoDto dto)
     {
@@ -435,6 +471,12 @@ public sealed class AgendaService : IAgendaService
 
         if (agendamento.DtInicioAtendimento.HasValue)
             return ToItemDto(agendamento);
+
+        // G2 REC-11 (m-2, mesma regra do check-in): início só no DIA do agendamento.
+        if (_relogioClinica.Hoje() != agendamento.DtAgendamento.Date)
+            throw new RegraDeNegocioException(
+                $"Agendamento {id} está marcado para {agendamento.DtAgendamento:yyyy-MM-dd} "
+                + "e só pode iniciar atendimento no dia do agendamento.");
 
         if (dto.NrVersion != agendamento.NrVersion)
             throw new ConflitoConcorrenciaException("Agendamento", id);
