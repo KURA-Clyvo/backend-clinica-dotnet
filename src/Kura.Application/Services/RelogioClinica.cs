@@ -17,6 +17,17 @@ using Microsoft.Extensions.Logging;
 /// <para><b><see cref="TimeProvider"/> injetável</b> (não <c>DateTime.UtcNow</c> direto) para
 /// que testes fixem "agora" com um <c>FakeTimeProvider</c>/relógio fixo, sem depender do
 /// horário real da máquina que roda a suíte.</para>
+///
+/// <para><b>REC-08 fix wave (G2, m-5) — fallback do fallback.</b> Se NEM o fuso configurado NEM
+/// <see cref="FusoDefault"/> existirem no host (ex.: imagem sem <c>tzdata</c>), o construtor
+/// original teria deixado o <see cref="TimeZoneNotFoundException"/> do segundo
+/// <c>FindSystemTimeZoneById</c> escapar sem tratamento — como a resolução do singleton é
+/// preguiçosa (primeira injeção), isso vira <c>500</c> no primeiro request que tocar dashboard/
+/// teleconsulta/agenda, não uma falha na partida. Agora cai num fuso de OFFSET FIXO −03:00
+/// (<see cref="TimeZoneInfo.CreateCustomTimeZone(string, TimeSpan, string, string)"/>) com um
+/// segundo <c>WARN</c>, em vez de lançar. Não é logicamente idêntico ao fuso IANA (não segue
+/// mudança de lei de horário de verão), mas América/São Paulo não observa DST desde 2019 — hoje
+/// é equivalente na prática, e é estritamente melhor que derrubar a resolução.</para>
 /// </summary>
 public sealed class RelogioClinica : IRelogioClinica
 {
@@ -26,6 +37,23 @@ public sealed class RelogioClinica : IRelogioClinica
     private readonly TimeZoneInfo _fuso;
 
     public RelogioClinica(TimeProvider timeProvider, IConfiguration configuration, ILogger<RelogioClinica> logger)
+        : this(timeProvider, configuration, logger, TimeZoneInfo.FindSystemTimeZoneById)
+    {
+    }
+
+    /// <summary>
+    /// REC-08 fix wave (G2, m-5) — overload que recebe o RESOLVEDOR de fuso (função
+    /// <c>id → TimeZoneInfo</c>), para que o teste do fallback "nem o configurado nem o
+    /// default existem" não dependa de o host que roda a suíte ter ou não <c>tzdata</c>. A
+    /// injeção de dependência de produção sempre resolve o construtor de 3 parâmetros acima
+    /// (nenhum <c>Func&lt;string, TimeZoneInfo&gt;</c> está registrado no container, então o
+    /// .NET DI descarta este overload e usa o outro — sem registro extra necessário).
+    /// </summary>
+    public RelogioClinica(
+        TimeProvider timeProvider,
+        IConfiguration configuration,
+        ILogger<RelogioClinica> logger,
+        Func<string, TimeZoneInfo> resolverFuso)
     {
         _timeProvider = timeProvider;
 
@@ -34,7 +62,7 @@ public sealed class RelogioClinica : IRelogioClinica
 
         try
         {
-            _fuso = TimeZoneInfo.FindSystemTimeZoneById(fusoId);
+            _fuso = resolverFuso(fusoId);
         }
         catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException)
         {
@@ -43,7 +71,23 @@ public sealed class RelogioClinica : IRelogioClinica
                 "RelogioClinica: fuso '{FusoId}' inválido ou não encontrado neste host — usando o default {FusoDefault}.",
                 fusoId,
                 FusoDefault);
-            _fuso = TimeZoneInfo.FindSystemTimeZoneById(FusoDefault);
+
+            try
+            {
+                _fuso = resolverFuso(FusoDefault);
+            }
+            catch (Exception ex2) when (ex2 is TimeZoneNotFoundException or InvalidTimeZoneException)
+            {
+                logger.LogWarning(
+                    ex2,
+                    "RelogioClinica: fuso default '{FusoDefault}' também não encontrado neste host — usando offset fixo -03:00 (sem horário de verão).",
+                    FusoDefault);
+                _fuso = TimeZoneInfo.CreateCustomTimeZone(
+                    "America/Sao_Paulo (offset fixo)",
+                    TimeSpan.FromHours(-3),
+                    "Horário de Brasília (fixo)",
+                    "Horário de Brasília (fixo)");
+            }
         }
     }
 
