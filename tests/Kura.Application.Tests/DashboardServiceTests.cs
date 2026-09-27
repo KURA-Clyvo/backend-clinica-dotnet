@@ -10,12 +10,19 @@ public class DashboardServiceTests
 {
     private const long IdClinicaContexto = 1;
 
+    // REC-08 -- "agora" fixo do relógio da clínica para esta suíte inteira (não
+    // DateTime.UtcNow: o valor precisa ser ESTÁVEL para casar com o Setup que compara exato em
+    // GetHojeAsync_ChamaContarTeleorientacoesHojeComIdClinicaDoContextoEPropagaParaODto). Longe
+    // de meia-noite de propósito, para não ficar flaky perto da virada de dia.
+    private static readonly DateTime AgoraFixa = new(2026, 9, 26, 15, 0, 0);
+
     private readonly Mock<IEventoClinicoRepository> _eventoMock = new();
     private readonly Mock<IRepository<AlertaTemperatura>> _alertaMock = new();
     private readonly Mock<IRepository<Pet>> _petMock = new();
     private readonly Mock<IRepository<Vacina>> _vacinaMock = new();
     private readonly Mock<IAgendamentoRepository> _agendamentoMock = new();
     private readonly Mock<IClinicaContext> _clinicaContextMock = new();
+    private readonly IRelogioClinica _relogio = new RelogioClinicaFixo(AgoraFixa);
     private readonly DashboardService _sut;
 
     public DashboardServiceTests()
@@ -26,7 +33,7 @@ public class DashboardServiceTests
         _sut = new DashboardService(
             _eventoMock.Object, _alertaMock.Object,
             _petMock.Object, _vacinaMock.Object,
-            _agendamentoMock.Object, _clinicaContextMock.Object);
+            _agendamentoMock.Object, _clinicaContextMock.Object, _relogio);
     }
 
     [Fact]
@@ -128,8 +135,10 @@ public class DashboardServiceTests
     [Fact]
     public async Task GetHojeAsync_ChamaContarTeleorientacoesHojeComIdClinicaDoContextoEPropagaParaODto()
     {
-        // Arrange -- FD-17 item 3
-        var hoje = DateTime.UtcNow.Date;
+        // Arrange -- FD-17 item 3. REC-08: "hoje" aqui tem que ser o DO RELÓGIO (agora.Date),
+        // não DateTime.UtcNow.Date -- é o que DashboardService.GetHojeAsync agora passa para
+        // ContarTeleorientacoesHojeAsync.
+        var hoje = AgoraFixa.Date;
         _eventoMock.Setup(r => r.GetByFiltersAsync(null, null, null, null, null))
             .ReturnsAsync(new List<EventoClinico>());
         _alertaMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<AlertaTemperatura>());
