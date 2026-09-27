@@ -58,4 +58,26 @@ public class AgendaController(IAgendaService agendaService) : ControllerBase
         var result = await agendaService.AtualizarStatusAsync(id, dto);
         return Ok(result);
     }
+
+    /// <summary>
+    /// REC-10 — cria um agendamento pela recepção da clínica (ou pelo card de uma triagem
+    /// da Luna, F-3). <c>IdClinica</c> vem SEMPRE do JWT, nunca do corpo.
+    /// </summary>
+    /// <param name="dto">Dados do agendamento (tutor, pet, veterinário, data/hora local de
+    /// SP, tipo, duração opcional, observações opcionais, triagem de origem opcional).</param>
+    /// <returns>Agendamento criado, no mesmo shape do item de agenda (REC-09).</returns>
+    /// <response code="201">Agendamento criado com sucesso.</response>
+    /// <response code="400">Payload malformado (tipo fora da lista, duração fora de 5–480, etc.).</response>
+    /// <response code="404">Tutor, pet, veterinário ou triagem de origem não encontrados (ou pertencem a outra clínica — mesma resposta, sem oráculo).</response>
+    /// <response code="422">Pet não vinculado ao tutor; triagem de origem pertence a outro tutor da mesma clínica; ou data mais de 15 minutos no passado.</response>
+    [HttpPost("~/api/v1/agendamentos")]
+    [ProducesResponseType(typeof(AgendamentoItemDto), 201)]
+    [ProducesResponseType(typeof(ProblemDetails), 400)]
+    [ProducesResponseType(typeof(ProblemDetails), 404)]
+    [ProducesResponseType(typeof(ProblemDetails), 422)]
+    public async Task<IActionResult> Criar([FromBody] AgendamentoCreateDto dto)
+    {
+        var result = await agendaService.CriarAsync(dto);
+        return StatusCode(StatusCodes.Status201Created, result);
+    }
 }
