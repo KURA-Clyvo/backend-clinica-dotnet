@@ -254,7 +254,8 @@ public class CrossTenantRegressionTests
             clinicaContextMock.Object,
             new AgendamentoRepository(ctxClinicaA),
             new UnitOfWork(ctxClinicaA),
-            new Mock<IGeradorUrlFotoPet>().Object);
+            new Mock<IGeradorUrlFotoPet>().Object,
+            NullLogger<AgendaService>.Instance);
 
         var dto = new AtualizarStatusAgendamentoDto { DsStatus = "REALIZADO", NrVersion = 1 };
         // Act
@@ -293,7 +294,8 @@ public class CrossTenantRegressionTests
             clinicaContextMock.Object,
             new AgendamentoRepository(ctxClinicaA),
             new UnitOfWork(ctxClinicaA),
-            new Mock<IGeradorUrlFotoPet>().Object);
+            new Mock<IGeradorUrlFotoPet>().Object,
+            NullLogger<AgendaService>.Instance);
 
         var dto = new AtualizarStatusAgendamentoDto { DsStatus = "REALIZADO", NrVersion = 1 };
         // Act

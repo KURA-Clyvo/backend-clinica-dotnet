@@ -11,6 +11,7 @@ using Kura.Infrastructure.Persistence;
 using Kura.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
@@ -161,7 +162,8 @@ public class ObservabilityExtensionsTests
             clinicaContext.Object,
             Mock.Of<IAgendamentoRepository>(),
             Mock.Of<IUnitOfWork>(),
-            Mock.Of<IGeradorUrlFotoPet>());
+            Mock.Of<IGeradorUrlFotoPet>(),
+            NullLogger<AgendaService>.Instance);
 
         using var spanDeBorda = fonteDeBordaSimulada.StartActivity("GET /api/v1/agenda", ActivityKind.Server);
         spanDeBorda.Should().NotBeNull(
@@ -287,7 +289,8 @@ public class ObservabilityExtensionsTests
             clinicaContext.Object,
             Mock.Of<IAgendamentoRepository>(),
             Mock.Of<IUnitOfWork>(),
-            Mock.Of<IGeradorUrlFotoPet>());
+            Mock.Of<IGeradorUrlFotoPet>(),
+            NullLogger<AgendaService>.Instance);
 
         using var fonteHttpSimulada = new ActivitySource("Microsoft.AspNetCore");
         using var spanDeBorda = fonteHttpSimulada.StartActivity("GET api/v1/agenda", ActivityKind.Server);

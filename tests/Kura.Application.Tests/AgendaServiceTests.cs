@@ -7,6 +7,7 @@ using Kura.Application.Services;
 using Kura.Domain.Entities;
 using Kura.Domain.Exceptions;
 using Kura.Domain.Interfaces;
+using Microsoft.Extensions.Logging;
 
 public class AgendaServiceTests
 {
@@ -15,6 +16,7 @@ public class AgendaServiceTests
     private readonly Mock<IClinicaContext> _clinicaMock = new();
     private readonly Mock<IUnitOfWork> _uowMock = new();
     private readonly Mock<IGeradorUrlFotoPet> _geradorUrlFotoPetMock = new();
+    private readonly Mock<ILogger<AgendaService>> _loggerMock = new();
     private readonly AgendaService _sut;
 
     public AgendaServiceTests()
@@ -27,7 +29,8 @@ public class AgendaServiceTests
             _clinicaMock.Object,
             _agendamentoRepoMock.Object,
             _uowMock.Object,
-            _geradorUrlFotoPetMock.Object);
+            _geradorUrlFotoPetMock.Object,
+            _loggerMock.Object);
     }
 
     private static DateTime Inicio => new(2026, 5, 6);
@@ -422,6 +425,15 @@ public class AgendaServiceTests
 
     // ---------- REC-09 aceite (d): DsFotoThumbUrl reaproveita o gerador da FT-04 ----------
 
+    /// <summary>
+    /// G2 (m-6): a chave usada aqui tem que ser uma que o gerador REAL aceitaria
+    /// (<c>ChaveFotoPet.Base()</c> sempre produz <c>.../{uuid}.{ext}</c>, COM ponto/extensão)
+    /// — a versão anterior deste teste usava <c>"clinica/1/pet/5/foto"</c> (sem extensão), que
+    /// <c>ChaveFotoPet.Variante</c> RECUSA com <see cref="ArgumentException"/> na implementação
+    /// real; o mock escondia isso porque nunca chama a fórmula de verdade. Ver
+    /// <see cref="GetAgendaAsync_ChaveDeFotoMalformada_DsFotoThumbUrlNuloSemDerrubarAAgenda"/>
+    /// para o caso da chave sem extensão.
+    /// </summary>
     [Fact]
     public async Task GetAgendaAsync_ComFotoDoPet_UsaGeradorUrlFotoPetComSufixoThumb()
     {
@@ -435,23 +447,78 @@ public class AgendaServiceTests
                 DtAgendamento = Inicio.AddHours(9),
                 StStatus = "AGENDADO",
                 StAtiva = true,
-                Pet = new Pet { Id = 5, NmPet = "Rex", IdClinica = 1, IdEspecie = 1, DsFotoChave = "clinica/1/pet/5/foto" }
+                Pet = new Pet { Id = 5, NmPet = "Rex", IdClinica = 1, IdEspecie = 1, DsFotoChave = "clinica/1/pet/5/abc123.webp" }
             }
         };
         _readRepoMock.Setup(r => r.GetByIntervaloAsync(1L, Inicio, Fim, null))
             .ReturnsAsync(agendamentos);
         _geradorUrlFotoPetMock
-            .Setup(g => g.GerarUrl("clinica/1/pet/5/foto", Kura.Domain.Storage.ChaveFotoPet.SufixoThumb))
-            .Returns("https://kura.example/api/v1/fotos/clinica_1_pet_5_foto-thumb?exp=1&sig=abc");
+            .Setup(g => g.GerarUrl("clinica/1/pet/5/abc123.webp", Kura.Domain.Storage.ChaveFotoPet.SufixoThumb))
+            .Returns("https://kura.example/api/v1/fotos/clinica/1/pet/5/abc123_256.webp?exp=1&sig=abc");
 
         // Act
         var result = await _sut.GetAgendaAsync(Inicio, Fim, null);
 
         // Assert
         result.Agendamentos[0].DsFotoThumbUrl.Should().Be(
-            "https://kura.example/api/v1/fotos/clinica_1_pet_5_foto-thumb?exp=1&sig=abc");
+            "https://kura.example/api/v1/fotos/clinica/1/pet/5/abc123_256.webp?exp=1&sig=abc");
         _geradorUrlFotoPetMock.Verify(
-            g => g.GerarUrl("clinica/1/pet/5/foto", Kura.Domain.Storage.ChaveFotoPet.SufixoThumb),
+            g => g.GerarUrl("clinica/1/pet/5/abc123.webp", Kura.Domain.Storage.ChaveFotoPet.SufixoThumb),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// G2/m-6 — medido ao vivo pela sonda HTTP do revisor: uma chave sem extensão faz
+    /// <c>ChaveFotoPet.Variante</c> (chamada de dentro do gerador REAL) lançar
+    /// <see cref="ArgumentException"/>, e antes deste fix isso derrubava o <c>GET /agenda</c>
+    /// inteiro com <c>500</c> — não só a foto daquele card. <c>ToItemDto</c> agora protege a
+    /// chamada: o pet daquela linha fica sem foto (mesmo tratamento de "pet sem foto"), e o
+    /// resto da agenda continua de pé. Mordida real (não simulada): o mock aqui devolve o
+    /// MESMO comportamento do gerador real (lança para chave sem ponto) — sem o try/catch em
+    /// <c>GerarFotoThumbUrlSeguro</c>, este teste propagaria a exceção e falharia.
+    /// </summary>
+    [Fact]
+    public async Task GetAgendaAsync_ChaveDeFotoMalformada_DsFotoThumbUrlNuloSemDerrubarAAgenda()
+    {
+        // Arrange
+        var agendamentos = new List<Agendamento>
+        {
+            new()
+            {
+                Id = 42,
+                IdClinica = 1,
+                IdPet = 5,
+                DtAgendamento = Inicio.AddHours(9),
+                StStatus = "AGENDADO",
+                StAtiva = true,
+                Pet = new Pet { Id = 5, NmPet = "Rex", IdClinica = 1, IdEspecie = 1, DsFotoChave = "clinica/1/pet/5/foto-sem-extensao" }
+            }
+        };
+        _readRepoMock.Setup(r => r.GetByIntervaloAsync(1L, Inicio, Fim, null))
+            .ReturnsAsync(agendamentos);
+        _geradorUrlFotoPetMock
+            .Setup(g => g.GerarUrl("clinica/1/pet/5/foto-sem-extensao", Kura.Domain.Storage.ChaveFotoPet.SufixoThumb))
+            .Throws(new ArgumentException(
+                "Chave base 'clinica/1/pet/5/foto-sem-extensao' não tem extensão.", "chaveBase"));
+
+        // Act
+        var result = await _sut.GetAgendaAsync(Inicio, Fim, null);
+
+        // Assert -- a agenda inteira não cai; só a foto daquela linha fica null.
+        result.Agendamentos.Should().ContainSingle();
+        result.Agendamentos[0].DsFotoThumbUrl.Should().BeNull();
+
+        // Assert -- WARN registrado, SEM a chave (nem qualquer PII) no log; só ids numéricos.
+        _loggerMock.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((state, _) =>
+                    state.ToString()!.Contains("42") &&
+                    state.ToString()!.Contains("5") &&
+                    !state.ToString()!.Contains("foto-sem-extensao")),
+                It.IsAny<ArgumentException>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
     }
 

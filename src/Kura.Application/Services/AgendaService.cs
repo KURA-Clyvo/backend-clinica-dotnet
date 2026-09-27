@@ -6,6 +6,7 @@ using Kura.CrossCutting.Observability;
 using Kura.Domain.Exceptions;
 using Kura.Domain.Interfaces;
 using Kura.Domain.Storage;
+using Microsoft.Extensions.Logging;
 
 public sealed class AgendaService : IAgendaService
 {
@@ -14,6 +15,7 @@ public sealed class AgendaService : IAgendaService
     private readonly IClinicaContext _clinicaContext;
     private readonly IUnitOfWork _uow;
     private readonly IGeradorUrlFotoPet _geradorUrlFotoPet;
+    private readonly ILogger<AgendaService> _logger;
 
     /// <summary>
     /// FD-06 — <b>máquina de estados de <c>AGENDAMENTO.ST_STATUS</c> do lado <c>.NET</c>.</b>
@@ -125,13 +127,15 @@ public sealed class AgendaService : IAgendaService
         IClinicaContext clinicaContext,
         IAgendamentoRepository agendamentoRepository,
         IUnitOfWork uow,
-        IGeradorUrlFotoPet geradorUrlFotoPet)
+        IGeradorUrlFotoPet geradorUrlFotoPet,
+        ILogger<AgendaService> logger)
     {
         _readRepository = readRepository;
         _clinicaContext = clinicaContext;
         _agendamentoRepository = agendamentoRepository;
         _uow = uow;
         _geradorUrlFotoPet = geradorUrlFotoPet;
+        _logger = logger;
     }
 
     public async Task<AgendaResponseDto> GetAgendaAsync(
@@ -219,8 +223,37 @@ public sealed class AgendaService : IAgendaService
         DsNivelUrgenciaOrigem = a.TriagemOrigem?.DsNivelUrgencia,
         DsRespostaConfirmacao = a.DsRespostaConfirmacao,
         DsEtapaRecepcao = CalcularEtapaRecepcao(a.StStatus, a.DtCheckin, a.DtInicioAtendimento),
-        DsFotoThumbUrl = _geradorUrlFotoPet.GerarUrl(a.Pet?.DsFotoChave, ChaveFotoPet.SufixoThumb)
+        DsFotoThumbUrl = GerarFotoThumbUrlSeguro(a)
     };
+
+    /// <summary>
+    /// G2/m-6 — <c>IGeradorUrlFotoPet.GerarUrl</c> LANÇA (<see cref="ArgumentException"/> via
+    /// <c>ChaveFotoPet.Variante</c>) quando <c>Pet.DsFotoChave</c> não tem extensão — uma
+    /// chave que nunca deveria existir (todo produtor real passa por
+    /// <c>ChaveFotoPet.Base()</c>), mas que a G2 mediu ao vivo por HTTP: **uma** linha com
+    /// chave malformada derrubava o <c>GET /agenda</c> inteiro da clínica com <c>500</c>,
+    /// porque a chamada estava dentro do <c>Select</c> sem proteção. Uma foto ruim não pode
+    /// derrubar a lista inteira de agendamentos do dia — o card daquele pet específico fica
+    /// sem foto (mesmo comportamento de "pet sem foto"), o resto da agenda continua de pé.
+    ///
+    /// <para><b>Sem chave nem PII no log</b> (ruling do fix wave) — só os ids numéricos do
+    /// agendamento e do pet, que não identificam paciente/tutor por si sós.</para>
+    /// </summary>
+    private string? GerarFotoThumbUrlSeguro(Domain.Entities.Agendamento a)
+    {
+        try
+        {
+            return _geradorUrlFotoPet.GerarUrl(a.Pet?.DsFotoChave, ChaveFotoPet.SufixoThumb);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Falha ao gerar URL de foto para o agendamento {IdAgendamento} (pet {IdPet}) -- DsFotoThumbUrl sai null, o resto da agenda continua.",
+                a.Id, a.IdPet);
+            return null;
+        }
+    }
 
     /// <summary>
     /// A-3 — deriva a etapa de recepção NO SERVIDOR, num lugar só. Função pura (sem I/O,
