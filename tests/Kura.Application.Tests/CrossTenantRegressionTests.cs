@@ -315,6 +315,163 @@ public class CrossTenantRegressionTests
         result.DsStatus.Should().Be("REALIZADO");
     }
 
+    // ---------- Agendamento: CheckinAsync/IniciarAtendimentoAsync (REC-11) — mesmo padrão manual ----------
+
+    private static AgendaService BuildAgendaService(KuraDbContext ctx, long idClinica, DateTime agora)
+    {
+        var clinicaContextMock = new Mock<IClinicaContext>();
+        clinicaContextMock.Setup(c => c.IdClinica).Returns(idClinica);
+
+        var relogioMock = new Mock<IRelogioClinica>();
+        relogioMock.Setup(r => r.Agora()).Returns(agora);
+        // G2 REC-11 (m-2): a guarda de data compara com Hoje(), não com Agora() -- sem este
+        // setup, o mock devolveria default(DateTime) e a guarda recusaria com 422 todo teste
+        // que semeia DtAgendamento num dia real (2026-10-01).
+        relogioMock.Setup(r => r.Hoje()).Returns(agora.Date);
+
+        return new AgendaService(
+            new Mock<IAgendamentoReadRepository>().Object,
+            clinicaContextMock.Object,
+            new AgendamentoRepository(ctx),
+            new UnitOfWork(ctx),
+            new Mock<IGeradorUrlFotoPet>().Object,
+            NullLogger<AgendaService>.Instance,
+            new Mock<ITutorRepository>().Object,
+            new Mock<IPetRepository>().Object,
+            new Mock<IVeterinarioRepository>().Object,
+            new Mock<ITriagemLunaRepository>().Object,
+            relogioMock.Object);
+    }
+
+    [Fact]
+    public async Task AgendaService_Checkin_AgendamentoDeOutraClinica_LancaEntidadeNaoEncontrada()
+    {
+        // Arrange
+        var dbName = Guid.NewGuid().ToString();
+
+        await using (var seedCtx = CreateContext(dbName, idClinicaFiltro: null))
+        {
+            seedCtx.Agendamentos.Add(new Agendamento
+            {
+                Id = 30,
+                IdClinica = ClinicaB,
+                DtAgendamento = new DateTime(2026, 10, 1, 9, 0, 0),
+                StStatus = "AGENDADO",
+                NrVersion = 0,
+                StAtiva = true
+            });
+            await seedCtx.SaveChangesAsync();
+        }
+
+        await using var ctxClinicaA = CreateContext(dbName, idClinicaFiltro: null);
+        var sut = BuildAgendaService(ctxClinicaA, ClinicaA, new DateTime(2026, 10, 1, 9, 5, 0));
+
+        var dto = new RegistrarEventoRecepcaoDto { NrVersion = 0 };
+        // Act -- pede check-in de agendamento da clínica B autenticado como clínica A.
+        var act = async () => await sut.CheckinAsync(30L, dto);
+
+        // Assert -- mesma resposta do inexistente, sem oráculo (A-7).
+        await act.Should().ThrowAsync<EntidadeNaoEncontradaException>();
+    }
+
+    [Fact]
+    public async Task AgendaService_Checkin_AgendamentoDaMesmaClinica_RegistraCheckin()
+    {
+        // Arrange
+        var dbName = Guid.NewGuid().ToString();
+        var agora = new DateTime(2026, 10, 1, 9, 5, 0);
+
+        await using (var seedCtx = CreateContext(dbName, idClinicaFiltro: null))
+        {
+            seedCtx.Agendamentos.Add(new Agendamento
+            {
+                Id = 40,
+                IdClinica = ClinicaA,
+                DtAgendamento = new DateTime(2026, 10, 1, 9, 0, 0),
+                StStatus = "AGENDADO",
+                NrVersion = 0,
+                StAtiva = true
+            });
+            await seedCtx.SaveChangesAsync();
+        }
+
+        await using var ctxClinicaA = CreateContext(dbName, idClinicaFiltro: null);
+        var sut = BuildAgendaService(ctxClinicaA, ClinicaA, agora);
+
+        var dto = new RegistrarEventoRecepcaoDto { NrVersion = 0 };
+        // Act
+        var result = await sut.CheckinAsync(40L, dto);
+
+        // Assert
+        result.DtCheckin.Should().Be(agora);
+        result.NrVersion.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task AgendaService_IniciarAtendimento_AgendamentoDeOutraClinica_LancaEntidadeNaoEncontrada()
+    {
+        // Arrange
+        var dbName = Guid.NewGuid().ToString();
+
+        await using (var seedCtx = CreateContext(dbName, idClinicaFiltro: null))
+        {
+            seedCtx.Agendamentos.Add(new Agendamento
+            {
+                Id = 50,
+                IdClinica = ClinicaB,
+                DtAgendamento = new DateTime(2026, 10, 1, 9, 0, 0),
+                StStatus = "AGENDADO",
+                NrVersion = 0,
+                StAtiva = true
+            });
+            await seedCtx.SaveChangesAsync();
+        }
+
+        await using var ctxClinicaA = CreateContext(dbName, idClinicaFiltro: null);
+        var sut = BuildAgendaService(ctxClinicaA, ClinicaA, new DateTime(2026, 10, 1, 9, 5, 0));
+
+        var dto = new RegistrarEventoRecepcaoDto { NrVersion = 0 };
+        // Act
+        var act = async () => await sut.IniciarAtendimentoAsync(50L, dto);
+
+        // Assert
+        await act.Should().ThrowAsync<EntidadeNaoEncontradaException>();
+    }
+
+    [Fact]
+    public async Task AgendaService_IniciarAtendimento_AgendamentoDaMesmaClinica_RegistraInicioSemCheckin()
+    {
+        // Arrange -- walk-in: sem check-in prévio.
+        var dbName = Guid.NewGuid().ToString();
+        var agora = new DateTime(2026, 10, 1, 9, 5, 0);
+
+        await using (var seedCtx = CreateContext(dbName, idClinicaFiltro: null))
+        {
+            seedCtx.Agendamentos.Add(new Agendamento
+            {
+                Id = 60,
+                IdClinica = ClinicaA,
+                DtAgendamento = new DateTime(2026, 10, 1, 9, 0, 0),
+                StStatus = "AGENDADO",
+                NrVersion = 0,
+                StAtiva = true
+            });
+            await seedCtx.SaveChangesAsync();
+        }
+
+        await using var ctxClinicaA = CreateContext(dbName, idClinicaFiltro: null);
+        var sut = BuildAgendaService(ctxClinicaA, ClinicaA, agora);
+
+        var dto = new RegistrarEventoRecepcaoDto { NrVersion = 0 };
+        // Act
+        var result = await sut.IniciarAtendimentoAsync(60L, dto);
+
+        // Assert
+        result.DtInicioAtendimento.Should().Be(agora);
+        result.DtCheckin.Should().BeNull("início sem check-in é permitido e não inventa DtCheckin");
+        result.NrVersion.Should().Be(1);
+    }
+
     // ---------- TASK-63: TimelineRepository — isolamento cross-tenant via EventoClinico ----------
     //
     // GetByPetIdAsync não recebe idClinica explícito (ao contrário de AgendaService/TutorService,

@@ -54,6 +54,20 @@ public class AgendamentoStatusHttpTests : IClassFixture<KuraApiFactory>
     }
 
     /// <summary>
+    /// REC-11 — hora local de SP (mesma convenção de <c>IRelogioClinica</c>/A-5), não
+    /// <c>DateTime.UtcNow</c> cru. Antes da guarda de falta da REC-11 essa diferença de ~3h era
+    /// invisível aqui (nada comparava <c>DtAgendamento</c> com o relógio); com a guarda,
+    /// semear <c>UtcNow.AddHours(-1)</c> passou a ficar NO FUTURO em relação ao "agora" de SP
+    /// real, e <c>Marcar_falta_em_agendamento_AGENDADO_...</c> (que pede NAO_COMPARECEU) virava
+    /// 422 em vez de 200 — mordida real da própria REC-11 contra um teste pré-existente.
+    /// </summary>
+    private static DateTime AgoraSp()
+    {
+        var sp = TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo");
+        return TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, sp);
+    }
+
+    /// <summary>
     /// Semeia um agendamento na clínica do token. <c>Agendamento</c> NÃO tem
     /// <c>HasQueryFilter</c> — o escopo de tenant dele é manual, em
     /// <c>AgendaService</c>/<c>AgendamentoRepository</c>; por isso a semeadura enxerga tudo.
@@ -68,7 +82,7 @@ public class AgendamentoStatusHttpTests : IClassFixture<KuraApiFactory>
             Id = id,
             IdClinica = KuraApiFactory.IdClinicaSemeada,
             IdVeterinario = KuraApiFactory.IdVeterinarioSemeado,
-            DtAgendamento = DateTime.UtcNow.AddHours(-1),
+            DtAgendamento = AgoraSp().AddHours(-1),
             NrDuracaoMinutos = 30,
             DsTipoConsulta = "CONSULTA",
             StStatus = status,
