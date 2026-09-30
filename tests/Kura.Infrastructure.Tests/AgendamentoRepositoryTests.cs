@@ -173,4 +173,160 @@ public class AgendamentoRepositoryTests
         // Assert
         totalClinica1.Should().Be(1);
     }
+
+    // ── REC-15: GetConfirmacaoPendenteAsync ─────────────────────────────────
+    //
+    // Cada filtro é isolado em um teste próprio (a instrução do brief: "não teste
+    // todos juntos, isole cada filtro" — mordida em cada um comentando o predicado
+    // correspondente derrubaria só o teste daquele filtro).
+
+    private static Tutor TutorComWhatsapp(long id, long idClinica, string? dsWhatsapp) => new()
+    {
+        Id = id,
+        IdClinica = idClinica,
+        NmTutor = $"Tutor{id}",
+        NrCpf = $"1112223334{id}",
+        DsEmail = $"tutor{id}@teste.com",
+        NrTelefone = "5511999990000",
+        DsWhatsapp = dsWhatsapp
+    };
+
+    [Fact]
+    public async Task GetConfirmacaoPendenteAsync_FiltraPorStatusAgendado_IgnoraOutrosStatus()
+    {
+        var ctx = CreateContext();
+        var data = new DateTime(2026, 10, 5);
+        var tutor = TutorComWhatsapp(1, 1, "+5511900000001");
+        ctx.Tutores.Add(tutor);
+        ctx.Agendamentos.AddRange(
+            new Agendamento { Id = 1, IdClinica = 1, IdTutor = 1, StStatus = "AGENDADO", DtAgendamento = data.AddHours(9) },
+            new Agendamento { Id = 2, IdClinica = 1, IdTutor = 1, StStatus = "CONFIRMADO", DtAgendamento = data.AddHours(10) });
+        await ctx.SaveChangesAsync();
+
+        var repository = new AgendamentoRepository(ctx);
+        var resultado = (await repository.GetConfirmacaoPendenteAsync(data)).ToList();
+
+        resultado.Should().ContainSingle();
+        resultado[0].Id.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GetConfirmacaoPendenteAsync_FiltraPorData_IgnoraOutroDia()
+    {
+        var ctx = CreateContext();
+        var data = new DateTime(2026, 10, 5);
+        var tutor = TutorComWhatsapp(1, 1, "+5511900000001");
+        ctx.Tutores.Add(tutor);
+        ctx.Agendamentos.AddRange(
+            new Agendamento { Id = 1, IdClinica = 1, IdTutor = 1, StStatus = "AGENDADO", DtAgendamento = data.AddHours(9) },
+            new Agendamento { Id = 2, IdClinica = 1, IdTutor = 1, StStatus = "AGENDADO", DtAgendamento = data.AddDays(1).AddHours(9) });
+        await ctx.SaveChangesAsync();
+
+        var repository = new AgendamentoRepository(ctx);
+        var resultado = (await repository.GetConfirmacaoPendenteAsync(data)).ToList();
+
+        resultado.Should().ContainSingle();
+        resultado[0].Id.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GetConfirmacaoPendenteAsync_FiltraPorLembreteJaEnviado_IgnoraOsQueJaTemDtLembreteConfirmacao()
+    {
+        var ctx = CreateContext();
+        var data = new DateTime(2026, 10, 5);
+        var tutor = TutorComWhatsapp(1, 1, "+5511900000001");
+        ctx.Tutores.Add(tutor);
+        ctx.Agendamentos.AddRange(
+            new Agendamento { Id = 1, IdClinica = 1, IdTutor = 1, StStatus = "AGENDADO", DtAgendamento = data.AddHours(9), DtLembreteConfirmacao = null },
+            new Agendamento { Id = 2, IdClinica = 1, IdTutor = 1, StStatus = "AGENDADO", DtAgendamento = data.AddHours(10), DtLembreteConfirmacao = data.AddDays(-1) });
+        await ctx.SaveChangesAsync();
+
+        var repository = new AgendamentoRepository(ctx);
+        var resultado = (await repository.GetConfirmacaoPendenteAsync(data)).ToList();
+
+        resultado.Should().ContainSingle();
+        resultado[0].Id.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GetConfirmacaoPendenteAsync_FiltraPorTutorComWhatsapp_IgnoraTutorSemWhatsapp()
+    {
+        var ctx = CreateContext();
+        var data = new DateTime(2026, 10, 5);
+        var tutorComWhatsapp = TutorComWhatsapp(1, 1, "+5511900000001");
+        var tutorSemWhatsapp = TutorComWhatsapp(2, 1, dsWhatsapp: null);
+        ctx.Tutores.AddRange(tutorComWhatsapp, tutorSemWhatsapp);
+        ctx.Agendamentos.AddRange(
+            new Agendamento { Id = 1, IdClinica = 1, IdTutor = 1, StStatus = "AGENDADO", DtAgendamento = data.AddHours(9) },
+            new Agendamento { Id = 2, IdClinica = 1, IdTutor = 2, StStatus = "AGENDADO", DtAgendamento = data.AddHours(10) });
+        await ctx.SaveChangesAsync();
+
+        var repository = new AgendamentoRepository(ctx);
+        var resultado = (await repository.GetConfirmacaoPendenteAsync(data)).ToList();
+
+        resultado.Should().ContainSingle();
+        resultado[0].Id.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GetConfirmacaoPendenteAsync_FiltraPorTemTutor_IgnoraAgendamentoSemTutor()
+    {
+        var ctx = CreateContext();
+        var data = new DateTime(2026, 10, 5);
+        var tutor = TutorComWhatsapp(1, 1, "+5511900000001");
+        ctx.Tutores.Add(tutor);
+        ctx.Agendamentos.AddRange(
+            new Agendamento { Id = 1, IdClinica = 1, IdTutor = 1, StStatus = "AGENDADO", DtAgendamento = data.AddHours(9) },
+            new Agendamento { Id = 2, IdClinica = 1, IdTutor = null, StStatus = "AGENDADO", DtAgendamento = data.AddHours(10) });
+        await ctx.SaveChangesAsync();
+
+        var repository = new AgendamentoRepository(ctx);
+        var resultado = (await repository.GetConfirmacaoPendenteAsync(data)).ToList();
+
+        resultado.Should().ContainSingle();
+        resultado[0].Id.Should().Be(1);
+    }
+
+    /// <summary>
+    /// A-7 — duas clínicas: os dois candidatos elegíveis (clínicas DIFERENTES) devem
+    /// aparecer ambos, porque este método NÃO escopa por clínica de propósito
+    /// (decisão 2 do diário da REC-15 — é o job global de lembretes da Luna).
+    /// </summary>
+    [Fact]
+    public async Task GetConfirmacaoPendenteAsync_ComAgendamentosDeDuasClinicas_RetornaOsDasDuas()
+    {
+        var ctx = CreateContext();
+        var data = new DateTime(2026, 10, 5);
+        var tutorClinica1 = TutorComWhatsapp(1, 1, "+5511900000001");
+        var tutorClinica2 = TutorComWhatsapp(2, 2, "+5511900000002");
+        ctx.Tutores.AddRange(tutorClinica1, tutorClinica2);
+        ctx.Agendamentos.AddRange(
+            new Agendamento { Id = 1, IdClinica = 1, IdTutor = 1, StStatus = "AGENDADO", DtAgendamento = data.AddHours(9) },
+            new Agendamento { Id = 2, IdClinica = 2, IdTutor = 2, StStatus = "AGENDADO", DtAgendamento = data.AddHours(11) });
+        await ctx.SaveChangesAsync();
+
+        var repository = new AgendamentoRepository(ctx);
+        var resultado = (await repository.GetConfirmacaoPendenteAsync(data)).ToList();
+
+        resultado.Should().HaveCount(2);
+        resultado.Should().Contain(a => a.IdClinica == 1);
+        resultado.Should().Contain(a => a.IdClinica == 2);
+    }
+
+    [Fact]
+    public async Task GetByIdComTutorAsync_AgendamentoExiste_CarregaTutorJunto()
+    {
+        var ctx = CreateContext();
+        var tutor = TutorComWhatsapp(1, 1, "+5511900000001");
+        ctx.Tutores.Add(tutor);
+        ctx.Agendamentos.Add(new Agendamento { Id = 1, IdClinica = 1, IdTutor = 1, StStatus = "AGENDADO", DtAgendamento = DateTime.UtcNow });
+        await ctx.SaveChangesAsync();
+
+        var repository = new AgendamentoRepository(ctx);
+        var resultado = await repository.GetByIdComTutorAsync(1);
+
+        resultado.Should().NotBeNull();
+        resultado!.Tutor.Should().NotBeNull();
+        resultado.Tutor!.Id.Should().Be(1);
+    }
 }

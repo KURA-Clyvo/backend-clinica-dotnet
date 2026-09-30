@@ -62,7 +62,10 @@ public class LgpdNaoVazamentoTests
             interacaoRepo.Object,
             Mock.Of<ITutorRepository>(),
             Mock.Of<IUnitOfWork>(),
-            Mock.Of<IClinicaContext>());
+            Mock.Of<IClinicaContext>(),
+            Mock.Of<IAgendamentoRepository>(),
+            Mock.Of<IConsentimentoRepository>(),
+            Mock.Of<IRelogioClinica>());
 
         var dto = new InteractionRequestDto
         {
@@ -98,7 +101,10 @@ public class LgpdNaoVazamentoTests
             Mock.Of<IRepository<InteracaoCanal>>(),
             tutorRepo.Object,
             Mock.Of<IUnitOfWork>(),
-            Mock.Of<IClinicaContext>());
+            Mock.Of<IClinicaContext>(),
+            Mock.Of<IAgendamentoRepository>(),
+            Mock.Of<IConsentimentoRepository>(),
+            Mock.Of<IRelogioClinica>());
 
         var dto = new InteractionRequestDto
         {

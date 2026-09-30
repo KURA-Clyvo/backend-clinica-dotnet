@@ -115,4 +115,64 @@ public class LunaController(ILunaService lunaService) : ControllerBase
         var result = await lunaService.ListarTriagensAsync(urgencia, dataInicio, dataFim, page, pageSize);
         return Ok(result);
     }
+
+    /// <summary>
+    /// REC-15: agendamentos elegíveis para receber lembrete de confirmação D-1 na data
+    /// informada. SEM escopo de clínica (API key, sem JWT — ver LunaService para a
+    /// decisão completa): devolve candidatos de TODAS as clínicas numa passada só.
+    /// </summary>
+    /// <param name="data">Data do agendamento (hora local de São Paulo, A-5).</param>
+    /// <returns>Lista de candidatos a lembrete.</returns>
+    /// <response code="200">Lista retornada com sucesso (pode ser vazia).</response>
+    [HttpGet("agendamentos/confirmacao-pendente")]
+    [AllowAnonymous]
+    [ServiceFilter(typeof(LunaApiKeyAuthFilter))]
+    [ProducesResponseType(typeof(IReadOnlyList<ConfirmacaoPendenteItemDto>), 200)]
+    public async Task<IActionResult> ListarConfirmacaoPendente([FromQuery] DateTime data)
+    {
+        var result = await lunaService.ListarConfirmacaoPendenteAsync(data);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// REC-15: marca que o lembrete de confirmação D-1 foi enviado para este
+    /// agendamento. Idempotente — chamadas repetidas não reescrevem a data já gravada.
+    /// </summary>
+    /// <param name="id">Id do agendamento.</param>
+    /// <response code="200">Lembrete marcado (ou já estava marcado).</response>
+    /// <response code="404">Agendamento não existe.</response>
+    [HttpPost("agendamentos/{id:long}/lembrete-enviado")]
+    [AllowAnonymous]
+    [ServiceFilter(typeof(LunaApiKeyAuthFilter))]
+    [ProducesResponseType(typeof(LembreteEnviadoResponseDto), 200)]
+    [ProducesResponseType(typeof(ProblemDetails), 404)]
+    public async Task<IActionResult> RegistrarLembreteEnviado(long id)
+    {
+        var result = await lunaService.RegistrarLembreteEnviadoAsync(id);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// REC-15: registra a resposta do tutor ao lembrete de confirmação D-1. A Luna já
+    /// resolveu o tutor pelo telefone na entrada; o servidor confere que id_tutor é o
+    /// tutor DESTE agendamento (G0 item 11) antes de aplicar a transição (A-10/b).
+    /// </summary>
+    /// <param name="id">Id do agendamento.</param>
+    /// <param name="dto">id_tutor e resposta (SIM | CANCELAR | REMARCAR).</param>
+    /// <response code="200">Resposta processada.</response>
+    /// <response code="400">Payload malformado (resposta fora do enum).</response>
+    /// <response code="404">Agendamento não existe.</response>
+    /// <response code="422">Tutor não corresponde ao agendamento, ou status não aceita resposta.</response>
+    [HttpPost("agendamentos/{id:long}/resposta-confirmacao")]
+    [AllowAnonymous]
+    [ServiceFilter(typeof(LunaApiKeyAuthFilter))]
+    [ProducesResponseType(typeof(RespostaConfirmacaoResponseDto), 200)]
+    [ProducesResponseType(typeof(ProblemDetails), 400)]
+    [ProducesResponseType(typeof(ProblemDetails), 404)]
+    [ProducesResponseType(typeof(ProblemDetails), 422)]
+    public async Task<IActionResult> RegistrarRespostaConfirmacao(long id, [FromBody] RespostaConfirmacaoRequestDto dto)
+    {
+        var result = await lunaService.RegistrarRespostaConfirmacaoAsync(id, dto);
+        return Ok(result);
+    }
 }

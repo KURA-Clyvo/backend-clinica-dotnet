@@ -50,28 +50,56 @@ public sealed class LunaService : ILunaService
     // MedicamentoService.ListarAsync (o único outro endpoint paginado do repo).
     private const int PageSizeMaximo = 100;
 
+    // REC-15: DS_TIPO de CONSENTIMENTO que autoriza lembrete de confirmação D-1 — mesmo
+    // valor usado pela subquery ST_CONSENTE_LEMBRETE de VW_VACINAS_VENCENDO
+    // (backend-tutor-java, V21). Não existe coluna de consentimento em TUTOR nem em
+    // AGENDAMENTO (achado 1 do diário rec-15-report.md) — é sempre derivado daqui.
+    private const string TipoConsentimentoLembrete = "LEMBRETES";
+
+    // REC-15 — estados de AGENDAMENTO.ST_STATUS a partir dos quais uma resposta de
+    // confirmação D-1 é aceita. DECLARADO separadamente do
+    // AgendaService.StatusElegiveisParaEventoRecepcao (mesmos 2 valores, conceito
+    // diferente — recepção presencial vs. confirmação remota da Luna; reaproveitar
+    // exigiria expor um private static de outro service por 2 strings idênticas, o
+    // que não paga o acoplamento). Qualquer outro estado (CANCELADO/REALIZADO/
+    // NAO_COMPARECEU/INTENCAO) ⇒ 422 — cobre o aceite "resposta a agendamento já
+    // CANCELADO ⇒ 422".
+    private static readonly IReadOnlySet<string> StatusElegiveisParaResposta =
+        new HashSet<string>(StringComparer.Ordinal) { "AGENDADO", "CONFIRMADO" };
+
     private readonly ITriagemLunaRepository _triagemRepository;
     private readonly IRepository<InteracaoCanal> _interacaoRepository;
     private readonly ITutorRepository _tutorRepository;
     private readonly IUnitOfWork _uow;
 
-    // LU-08: única dependência nova do service. Os 3 endpoints TASK-67
+    // LU-08: única dependência nova do service à época. Os 3 endpoints TASK-67
     // (interactions/triage/relatório histórico) são chamados sem JWT de clínica — só
     // GET /triagens usa isto, e só ele pode (é o único [Authorize] simples dos 4).
     private readonly IClinicaContext _clinicaContext;
+
+    // REC-15
+    private readonly IAgendamentoRepository _agendamentoRepository;
+    private readonly IConsentimentoRepository _consentimentoRepository;
+    private readonly IRelogioClinica _relogioClinica;
 
     public LunaService(
         ITriagemLunaRepository triagemRepository,
         IRepository<InteracaoCanal> interacaoRepository,
         ITutorRepository tutorRepository,
         IUnitOfWork uow,
-        IClinicaContext clinicaContext)
+        IClinicaContext clinicaContext,
+        IAgendamentoRepository agendamentoRepository,
+        IConsentimentoRepository consentimentoRepository,
+        IRelogioClinica relogioClinica)
     {
         _triagemRepository = triagemRepository;
         _interacaoRepository = interacaoRepository;
         _tutorRepository = tutorRepository;
         _uow = uow;
         _clinicaContext = clinicaContext;
+        _agendamentoRepository = agendamentoRepository;
+        _consentimentoRepository = consentimentoRepository;
+        _relogioClinica = relogioClinica;
     }
 
     public async Task<RelatorioTriagensDto> GerarRelatorioAsync(DateTime dataInicio, DateTime dataFim)
@@ -361,5 +389,159 @@ public sealed class LunaService : ILunaService
 
         builder.Append(MarcadorTruncamento);
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// REC-15 — GET /api/v1/luna/agendamentos/confirmacao-pendente?data=. SEM escopo de
+    /// clínica (decisão 2 do diário rec-15-report.md: é o job global de lembretes da
+    /// Luna, que serve todas as clínicas numa passada só — não há JWT para restringir e
+    /// não faria sentido de produto restringir). O repositório já filtra
+    /// status/data/tutor-com-whatsapp; aqui resta o único filtro que não tem coluna
+    /// própria — consentimento de lembrete (achado 1: não existe
+    /// TUTOR.ST_CONSENTE_LEMBRETE, é derivado de CONSENTIMENTO por tutor, mesma regra
+    /// de VW_VACINAS_VENCENDO: aceito E não revogado, empate por DT_ACEITE mais
+    /// recente).
+    /// </summary>
+    public async Task<IReadOnlyList<ConfirmacaoPendenteItemDto>> ListarConfirmacaoPendenteAsync(DateTime data)
+    {
+        var candidatos = await _agendamentoRepository.GetConfirmacaoPendenteAsync(data);
+
+        var resultado = new List<ConfirmacaoPendenteItemDto>();
+        foreach (var agendamento in candidatos)
+        {
+            // Filtro do repositório já garante IdTutor/Tutor/DsWhatsapp não nulos.
+            var idTutor = agendamento.IdTutor!.Value;
+            var consentimento = await _consentimentoRepository.GetMaisRecenteAsync(idTutor, TipoConsentimentoLembrete);
+
+            if (consentimento is null || consentimento.StAceito != 'S' || consentimento.DtRevogacao is not null)
+                continue;
+
+            resultado.Add(new ConfirmacaoPendenteItemDto
+            {
+                IdAgendamento = agendamento.Id,
+                IdClinica = agendamento.IdClinica,
+                IdTutor = idTutor,
+                DsWhatsapp = agendamento.Tutor!.DsWhatsapp!,
+                NmTutor = agendamento.Tutor.NmTutor,
+                NmPet = agendamento.Pet?.NmPet,
+                DtAgendamento = agendamento.DtAgendamento,
+                DsServico = agendamento.DsServico
+            });
+        }
+
+        return resultado;
+    }
+
+    /// <summary>
+    /// REC-15 — POST /api/v1/luna/agendamentos/{id}/lembrete-enviado. Idempotente:
+    /// grava DT_LEMBRETE_CONFIRMACAO = agora (relógio da clínica, A-5) SÓ se ainda
+    /// nulo; se já preenchido, devolve o valor já gravado SEM reescrever (200, nunca
+    /// 409 — idempotência, não conflito, decisão 3 do diário). NrVersion é
+    /// incrementado na escrita real para que o EF (IsConcurrencyToken) detecte uma
+    /// corrida genuína e falhe com 409 em vez de perder uma escrita silenciosamente —
+    /// ver decisão 3 (não é UPDATE atômico por coluna porque o provider InMemory dos
+    /// testes deste repo não suporta ExecuteUpdateAsync).
+    /// </summary>
+    public async Task<LembreteEnviadoResponseDto> RegistrarLembreteEnviadoAsync(long idAgendamento)
+    {
+        var agendamento = await _agendamentoRepository.GetByIdComTutorAsync(idAgendamento)
+            ?? throw new EntidadeNaoEncontradaException("Agendamento", idAgendamento);
+
+        if (agendamento.DtLembreteConfirmacao.HasValue)
+        {
+            return new LembreteEnviadoResponseDto
+            {
+                IdAgendamento = agendamento.Id,
+                DtLembreteConfirmacao = agendamento.DtLembreteConfirmacao.Value
+            };
+        }
+
+        var agora = _relogioClinica.Agora();
+        agendamento.DtLembreteConfirmacao = agora;
+        agendamento.NrVersion += 1;
+
+        _agendamentoRepository.Update(agendamento);
+        await _uow.CommitAsync();
+
+        return new LembreteEnviadoResponseDto
+        {
+            IdAgendamento = agendamento.Id,
+            DtLembreteConfirmacao = agora
+        };
+    }
+
+    /// <summary>
+    /// REC-15 — POST /api/v1/luna/agendamentos/{id}/resposta-confirmacao. A Luna já
+    /// resolveu o tutor pelo telefone na entrada (A-10/a); aqui o servidor confere que
+    /// dto.IdTutor É o tutor DAQUELE agendamento específico (G0 item 11) — a defesa
+    /// real destes 3 endpoints sem JWT de clínica (decisão 2 do diário). Mensagens de
+    /// erro carregam só ids numéricos, nunca telefone/whatsapp (LGPD — lição do A4:
+    /// nenhum dado sensível do corpo pode vazar para o log via exceção).
+    /// </summary>
+    public async Task<RespostaConfirmacaoResponseDto> RegistrarRespostaConfirmacaoAsync(
+        long idAgendamento, RespostaConfirmacaoRequestDto dto)
+    {
+        var agendamento = await _agendamentoRepository.GetByIdComTutorAsync(idAgendamento)
+            ?? throw new EntidadeNaoEncontradaException("Agendamento", idAgendamento);
+
+        // G0 item 11 — a defesa de identidade é o id_tutor batendo com O TUTOR DESTE
+        // agendamento, não um filtro de clínica (que nem sempre bloquearia: tutor
+        // certo/agendamento errado dentro da MESMA clínica passaria por um filtro de
+        // clínica sozinho). Mensagem sem PII de propósito.
+        if (agendamento.IdTutor is null || agendamento.IdTutor != dto.IdTutor)
+            throw new RegraDeNegocioException(
+                $"O tutor informado não corresponde ao tutor do agendamento {idAgendamento}.");
+
+        if (agendamento.StStatus is null || !StatusElegiveisParaResposta.Contains(agendamento.StStatus))
+            throw new RegraDeNegocioException(
+                $"Agendamento {idAgendamento} está com status '{agendamento.StStatus ?? "null"}' e não "
+                + "pode receber resposta de confirmação. Só é possível responder a partir de AGENDADO ou "
+                + "CONFIRMADO.");
+
+        var agora = _relogioClinica.Agora();
+        var houveEscrita = false;
+
+        switch (dto.Resposta)
+        {
+            case "SIM":
+                if (agendamento.StStatus != "CONFIRMADO")
+                {
+                    agendamento.StStatus = "CONFIRMADO";
+                    houveEscrita = true;
+                }
+                break;
+
+            case "CANCELAR":
+                agendamento.StStatus = "CANCELADO";
+                houveEscrita = true;
+                break;
+
+            case "REMARCAR":
+                // A-10(b): NÃO muda ST_STATUS — só registra o pedido, a clínica age
+                // depois.
+                houveEscrita = true;
+                break;
+
+            default:
+                throw new RegraDeNegocioException(
+                    $"Resposta de confirmação inválida: '{dto.Resposta}'. Valores aceitos: SIM, CANCELAR, REMARCAR.");
+        }
+
+        if (houveEscrita)
+        {
+            agendamento.DsRespostaConfirmacao = dto.Resposta;
+            agendamento.DtRespostaConfirmacao = agora;
+            agendamento.NrVersion += 1;
+
+            _agendamentoRepository.Update(agendamento);
+            await _uow.CommitAsync();
+        }
+
+        return new RespostaConfirmacaoResponseDto
+        {
+            IdAgendamento = agendamento.Id,
+            DsStatus = agendamento.StStatus ?? string.Empty,
+            DsRespostaConfirmacao = agendamento.DsRespostaConfirmacao
+        };
     }
 }
