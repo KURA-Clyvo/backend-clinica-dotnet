@@ -1077,6 +1077,37 @@ public class LunaServiceTests
     }
 
     /// <summary>
+    /// Fix wave G2 (m-2): mordida isolada faltante — tutor que RECUSOU explicitamente o
+    /// lembrete (ST_ACEITO='N', sem DT_REVOGACAO — recusa nunca aceita, não é
+    /// "revogação" de um aceite anterior) também não deve aparecer na listagem. A
+    /// produção já tratava isso corretamente (StAceito != 'S'); faltava o teste. Mordida:
+    /// removendo "consentimento.StAceito != 'S'" de ListarConfirmacaoPendenteAsync este
+    /// teste fica vermelho (confirmado pela G2 antes de sugerir o fix: EXIT=0 sem a
+    /// checagem, ou seja, o candidato aparecia indevidamente).
+    /// </summary>
+    [Fact]
+    public async Task ListarConfirmacaoPendenteAsync_ConsentimentoRecusado_NaoRetornaOCandidato()
+    {
+        var data = new DateTime(2026, 10, 1);
+        var tutor = TutorComWhatsapp();
+        var agendamento = AgendamentoConfirmacaoPendente(1, 1, tutor, data.AddHours(10));
+        var consentimentoRecusado = new Kura.Domain.Entities.Consentimento
+        {
+            Id = 1, IdTutor = tutor.Id, DsTipo = "LEMBRETES", StAceito = 'N',
+            NrVersaoTermo = "v1", DtConsentimento = new DateTime(2026, 1, 1), DtRevogacao = null
+        };
+
+        _agendamentoRepoMock.Setup(r => r.GetConfirmacaoPendenteAsync(data))
+            .ReturnsAsync([agendamento]);
+        _consentimentoRepoMock.Setup(r => r.GetMaisRecenteAsync(tutor.Id, "LEMBRETES"))
+            .ReturnsAsync(consentimentoRecusado);
+
+        var resultado = await _sut.ListarConfirmacaoPendenteAsync(data);
+
+        resultado.Should().BeEmpty();
+    }
+
+    /// <summary>
     /// Mordida isolada: consentimento existe mas foi REVOGADO (DT_REVOGACAO preenchida)
     /// — não conta como consentido, mesma regra de VW_VACINAS_VENCENDO (achado 1 do
     /// diário). Sem esta checagem (removendo "consentimento.DtRevogacao is not null"
@@ -1317,9 +1348,15 @@ public class LunaServiceTests
     [Fact]
     public async Task RegistrarRespostaConfirmacaoAsync_Remarcar_NaoMudaStStatus_SoRegistraOPedido()
     {
+        // Fix wave G2 (m-1): fixture trocado de "CONFIRMADO" para "AGENDADO" — é o
+        // ÚNICO estado que GetConfirmacaoPendenteAsync de fato lista para a Luna (o
+        // pipeline D-1 real entrega AGENDADO, nunca CONFIRMADO, a resposta-confirmacao).
+        // Com "CONFIRMADO", uma mutação que reatribuísse acidentalmente o MESMO valor
+        // do fixture (StStatus = "CONFIRMADO") passava despercebida (EXIT=0) — medido
+        // pela G2. Com "AGENDADO", essa classe de mutação-no-op fica impossível.
         var agendamento = new Kura.Domain.Entities.Agendamento
         {
-            Id = 1, IdClinica = 1, IdTutor = 7, StStatus = "CONFIRMADO", NrVersion = 3
+            Id = 1, IdClinica = 1, IdTutor = 7, StStatus = "AGENDADO", NrVersion = 3
         };
         var statusAntes = agendamento.StStatus;
         _agendamentoRepoMock.Setup(r => r.GetByIdComTutorAsync(1)).ReturnsAsync(agendamento);
