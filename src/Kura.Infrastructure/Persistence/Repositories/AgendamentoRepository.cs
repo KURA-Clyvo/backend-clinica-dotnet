@@ -41,6 +41,23 @@ public class AgendamentoRepository : IAgendamentoRepository
         => _context.Agendamentos
             .FirstOrDefaultAsync(a => a.Id == id && a.IdClinica == idClinica);
 
+    public Task<Agendamento?> GetByIdComTutorAsync(long id)
+        => _context.Agendamentos
+            .Include(a => a.Tutor)
+            .FirstOrDefaultAsync(a => a.Id == id);
+
+    public async Task<IEnumerable<Agendamento>> GetConfirmacaoPendenteAsync(DateTime data)
+        => await _context.Agendamentos
+            .Include(a => a.Tutor)
+            .Include(a => a.Pet)
+            .Where(a => a.StStatus == "AGENDADO"
+                && a.DtAgendamento.Date == data.Date
+                && a.DtLembreteConfirmacao == null
+                && a.IdTutor != null
+                && a.Tutor != null
+                && a.Tutor!.DsWhatsapp != null)
+            .ToListAsync();
+
     public Task<int> ContarTeleorientacoesHojeAsync(long idClinica, DateTime data)
         => _context.Agendamentos
             .Where(a => a.IdClinica == idClinica

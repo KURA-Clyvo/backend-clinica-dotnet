@@ -28,6 +28,28 @@ public interface IAgendamentoRepository
     Task<Agendamento?> GetByIdAsync(long id, long idClinica);
 
     /// <summary>
+    /// REC-15 — usado pelos 3 endpoints de confirmação D-1 consumidos pela Luna
+    /// (API key, sem JWT de clínica — A-7 decide que a defesa aqui não é escopo de
+    /// clínica, é o id_tutor do corpo batendo com o tutor do próprio agendamento,
+    /// conferido no service). Inclui <c>Tutor</c> (para validar id_tutor sem round
+    /// trip extra).
+    /// </summary>
+    Task<Agendamento?> GetByIdComTutorAsync(long id);
+
+    /// <summary>
+    /// REC-15 — candidatos a lembrete de confirmação D-1: ST_STATUS='AGENDADO', na
+    /// data informada (hora local de SP, mesma convenção de DtAgendamento — A-5),
+    /// ainda sem DT_LEMBRETE_CONFIRMACAO, com tutor vinculado E
+    /// Tutor.DsWhatsapp preenchido. SEM escopo de clínica de propósito (A-7): é o job
+    /// global de lembretes da Luna, que serve todas as clínicas numa passada só — ver
+    /// decisão 2 do diário da REC-15. A checagem de consentimento (CONSENTIMENTO,
+    /// DS_TIPO='LEMBRETES') NÃO é feita aqui — fica no service, via
+    /// IConsentimentoRepository, porque não existe coluna de consentimento em TUTOR
+    /// nem em AGENDAMENTO (achado 1 do diário).
+    /// </summary>
+    Task<IEnumerable<Agendamento>> GetConfirmacaoPendenteAsync(DateTime data);
+
+    /// <summary>
     /// FD-17 — conta agendamentos de teleconsulta cuja sessão foi iniciada no dia informado,
     /// escopados por clínica (mesma razão de <see cref="GetProximosDoDiaAsync"/>: <c>Agendamento</c>
     /// não tem filtro global). "Hoje" aqui é <c>DT_INICIO_SESSAO</c>, não

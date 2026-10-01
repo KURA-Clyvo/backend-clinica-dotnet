@@ -20,6 +20,12 @@ public class LunaServiceTests
     // clínica semeada 1 — testes de ListarTriagensAsync sobrescrevem quando
     // precisam de outro valor.
     private readonly Mock<IClinicaContext> _clinicaContextMock = new();
+
+    // REC-15
+    private readonly Mock<IAgendamentoRepository> _agendamentoRepoMock = new();
+    private readonly Mock<IConsentimentoRepository> _consentimentoRepoMock = new();
+    private readonly Mock<IRelogioClinica> _relogioClinicaMock = new();
+
     private readonly LunaService _sut;
 
     public LunaServiceTests()
@@ -31,7 +37,10 @@ public class LunaServiceTests
             _interacaoRepoMock.Object,
             _tutorRepoMock.Object,
             _uowMock.Object,
-            _clinicaContextMock.Object);
+            _clinicaContextMock.Object,
+            _agendamentoRepoMock.Object,
+            _consentimentoRepoMock.Object,
+            _relogioClinicaMock.Object);
     }
 
     private static DateTime Inicio => new(2026, 5, 1);
@@ -984,5 +993,422 @@ public class LunaServiceTests
             "Oracle devolve Unspecified; o service tem de restaurar Utc antes de compor o DTO");
         JsonSerializer.Serialize(dto.DtTriagem).Should().EndWith("Z\"",
             "sem Kind=Utc, System.Text.Json omite o offset e o app interpreta como hora local");
+    }
+
+    // ── REC-15: ListarConfirmacaoPendenteAsync ──────────────────────────────
+
+    private static Kura.Domain.Entities.Tutor TutorComWhatsapp(
+        long id = 7, long idClinica = 1, string? dsWhatsapp = "+5511999990000", string nmTutor = "Fulano") => new()
+    {
+        Id = id,
+        IdClinica = idClinica,
+        NmTutor = nmTutor,
+        NrCpf = "11122233344",
+        DsEmail = "fulano@teste.com",
+        NrTelefone = "5511999990000",
+        DsWhatsapp = dsWhatsapp
+    };
+
+    private static Kura.Domain.Entities.Agendamento AgendamentoConfirmacaoPendente(
+        long id, long idClinica, Kura.Domain.Entities.Tutor tutor, DateTime dtAgendamento) => new()
+    {
+        Id = id,
+        IdClinica = idClinica,
+        IdTutor = tutor.Id,
+        Tutor = tutor,
+        StStatus = "AGENDADO",
+        DtAgendamento = dtAgendamento,
+        NrVersion = 0
+    };
+
+    private static Kura.Domain.Entities.Consentimento ConsentimentoAceito(long idTutor) => new()
+    {
+        Id = 1,
+        IdTutor = idTutor,
+        DsTipo = "LEMBRETES",
+        StAceito = 'S',
+        NrVersaoTermo = "v1",
+        DtConsentimento = new DateTime(2026, 1, 1),
+        DtRevogacao = null
+    };
+
+    [Fact]
+    public async Task ListarConfirmacaoPendenteAsync_TutorConsenteEComWhatsapp_RetornaItem()
+    {
+        // Arrange
+        var data = new DateTime(2026, 10, 1);
+        var tutor = TutorComWhatsapp();
+        var agendamento = AgendamentoConfirmacaoPendente(1, 1, tutor, data.AddHours(10));
+
+        _agendamentoRepoMock.Setup(r => r.GetConfirmacaoPendenteAsync(data))
+            .ReturnsAsync([agendamento]);
+        _consentimentoRepoMock.Setup(r => r.GetMaisRecenteAsync(tutor.Id, "LEMBRETES"))
+            .ReturnsAsync(ConsentimentoAceito(tutor.Id));
+
+        // Act
+        var resultado = await _sut.ListarConfirmacaoPendenteAsync(data);
+
+        // Assert
+        resultado.Should().ContainSingle();
+        resultado[0].IdAgendamento.Should().Be(1);
+        resultado[0].IdTutor.Should().Be(tutor.Id);
+        resultado[0].DsWhatsapp.Should().Be(tutor.DsWhatsapp);
+    }
+
+    /// <summary>
+    /// Mordida isolada (não junto com os outros filtros): sem consentimento registrado,
+    /// o candidato não aparece — mesmo estando elegível em tudo o mais.
+    /// </summary>
+    [Fact]
+    public async Task ListarConfirmacaoPendenteAsync_SemConsentimentoRegistrado_NaoRetornaOCandidato()
+    {
+        var data = new DateTime(2026, 10, 1);
+        var tutor = TutorComWhatsapp();
+        var agendamento = AgendamentoConfirmacaoPendente(1, 1, tutor, data.AddHours(10));
+
+        _agendamentoRepoMock.Setup(r => r.GetConfirmacaoPendenteAsync(data))
+            .ReturnsAsync([agendamento]);
+        _consentimentoRepoMock.Setup(r => r.GetMaisRecenteAsync(tutor.Id, "LEMBRETES"))
+            .ReturnsAsync((Kura.Domain.Entities.Consentimento?)null);
+
+        var resultado = await _sut.ListarConfirmacaoPendenteAsync(data);
+
+        resultado.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Fix wave G2 (m-2): mordida isolada faltante — tutor que RECUSOU explicitamente o
+    /// lembrete (ST_ACEITO='N', sem DT_REVOGACAO — recusa nunca aceita, não é
+    /// "revogação" de um aceite anterior) também não deve aparecer na listagem. A
+    /// produção já tratava isso corretamente (StAceito != 'S'); faltava o teste. Mordida:
+    /// removendo "consentimento.StAceito != 'S'" de ListarConfirmacaoPendenteAsync este
+    /// teste fica vermelho (confirmado pela G2 antes de sugerir o fix: EXIT=0 sem a
+    /// checagem, ou seja, o candidato aparecia indevidamente).
+    /// </summary>
+    [Fact]
+    public async Task ListarConfirmacaoPendenteAsync_ConsentimentoRecusado_NaoRetornaOCandidato()
+    {
+        var data = new DateTime(2026, 10, 1);
+        var tutor = TutorComWhatsapp();
+        var agendamento = AgendamentoConfirmacaoPendente(1, 1, tutor, data.AddHours(10));
+        var consentimentoRecusado = new Kura.Domain.Entities.Consentimento
+        {
+            Id = 1, IdTutor = tutor.Id, DsTipo = "LEMBRETES", StAceito = 'N',
+            NrVersaoTermo = "v1", DtConsentimento = new DateTime(2026, 1, 1), DtRevogacao = null
+        };
+
+        _agendamentoRepoMock.Setup(r => r.GetConfirmacaoPendenteAsync(data))
+            .ReturnsAsync([agendamento]);
+        _consentimentoRepoMock.Setup(r => r.GetMaisRecenteAsync(tutor.Id, "LEMBRETES"))
+            .ReturnsAsync(consentimentoRecusado);
+
+        var resultado = await _sut.ListarConfirmacaoPendenteAsync(data);
+
+        resultado.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Mordida isolada: consentimento existe mas foi REVOGADO (DT_REVOGACAO preenchida)
+    /// — não conta como consentido, mesma regra de VW_VACINAS_VENCENDO (achado 1 do
+    /// diário). Sem esta checagem (removendo "consentimento.DtRevogacao is not null"
+    /// de ListarConfirmacaoPendenteAsync) este teste fica vermelho.
+    /// </summary>
+    [Fact]
+    public async Task ListarConfirmacaoPendenteAsync_ConsentimentoRevogado_NaoRetornaOCandidato()
+    {
+        var data = new DateTime(2026, 10, 1);
+        var tutor = TutorComWhatsapp();
+        var agendamento = AgendamentoConfirmacaoPendente(1, 1, tutor, data.AddHours(10));
+        var consentimentoRevogado = ConsentimentoAceito(tutor.Id);
+        consentimentoRevogado.DtRevogacao = new DateTime(2026, 6, 1);
+
+        _agendamentoRepoMock.Setup(r => r.GetConfirmacaoPendenteAsync(data))
+            .ReturnsAsync([agendamento]);
+        _consentimentoRepoMock.Setup(r => r.GetMaisRecenteAsync(tutor.Id, "LEMBRETES"))
+            .ReturnsAsync(consentimentoRevogado);
+
+        var resultado = await _sut.ListarConfirmacaoPendenteAsync(data);
+
+        resultado.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// A-7 — teste de DUAS clínicas: candidatos elegíveis de clínicas DIFERENTES devem
+    /// aparecer AMBOS (prova que não há filtro acidental de clínica única e que os
+    /// campos de uma linha não contaminam a outra) — decisão 2 do diário: estes
+    /// endpoints não escopam por clínica de propósito.
+    /// </summary>
+    [Fact]
+    public async Task ListarConfirmacaoPendenteAsync_DuasClinicas_RetornaAmbosOsCandidatos()
+    {
+        var data = new DateTime(2026, 10, 1);
+        var tutor1 = TutorComWhatsapp(id: 7, idClinica: 1, dsWhatsapp: "+5511900000001", nmTutor: "TutorClinica1");
+        var tutor2 = TutorComWhatsapp(id: 8, idClinica: 2, dsWhatsapp: "+5511900000002", nmTutor: "TutorClinica2");
+        var agendamento1 = AgendamentoConfirmacaoPendente(1, 1, tutor1, data.AddHours(9));
+        var agendamento2 = AgendamentoConfirmacaoPendente(2, 2, tutor2, data.AddHours(11));
+
+        _agendamentoRepoMock.Setup(r => r.GetConfirmacaoPendenteAsync(data))
+            .ReturnsAsync([agendamento1, agendamento2]);
+        _consentimentoRepoMock.Setup(r => r.GetMaisRecenteAsync(tutor1.Id, "LEMBRETES"))
+            .ReturnsAsync(ConsentimentoAceito(tutor1.Id));
+        _consentimentoRepoMock.Setup(r => r.GetMaisRecenteAsync(tutor2.Id, "LEMBRETES"))
+            .ReturnsAsync(ConsentimentoAceito(tutor2.Id));
+
+        var resultado = await _sut.ListarConfirmacaoPendenteAsync(data);
+
+        resultado.Should().HaveCount(2);
+        resultado.Should().Contain(i => i.IdClinica == 1 && i.IdTutor == tutor1.Id);
+        resultado.Should().Contain(i => i.IdClinica == 2 && i.IdTutor == tutor2.Id);
+    }
+
+    // ── REC-15: RegistrarLembreteEnviadoAsync ───────────────────────────────
+
+    [Fact]
+    public async Task RegistrarLembreteEnviadoAsync_PrimeiraChamada_GravaDtLembreteConfirmacaoComAgoraDoRelogio()
+    {
+        var agora = new DateTime(2026, 10, 1, 9, 0, 0);
+        var agendamento = new Kura.Domain.Entities.Agendamento
+        {
+            Id = 1, IdClinica = 1, StStatus = "AGENDADO", NrVersion = 0, DtLembreteConfirmacao = null
+        };
+
+        _agendamentoRepoMock.Setup(r => r.GetByIdComTutorAsync(1)).ReturnsAsync(agendamento);
+        _relogioClinicaMock.Setup(r => r.Agora()).Returns(agora);
+
+        var resultado = await _sut.RegistrarLembreteEnviadoAsync(1);
+
+        resultado.DtLembreteConfirmacao.Should().Be(agora);
+        agendamento.DtLembreteConfirmacao.Should().Be(agora);
+        agendamento.NrVersion.Should().Be(1);
+        _uowMock.Verify(u => u.CommitAsync(), Times.Once);
+    }
+
+    /// <summary>
+    /// Idempotência REAL — 2 chamadas em sequência, com o relógio avançando entre
+    /// elas (não apenas "não dá erro"): a 2a chamada tem que devolver a MESMA data da
+    /// 1a, não uma data nova. O mesmo objeto de agendamento é reaproveitado entre as
+    /// duas chamadas (simulando 2 requisições sequenciais reais, onde a 2a lê o
+    /// estado já persistido pela 1a).
+    /// </summary>
+    [Fact]
+    public async Task RegistrarLembreteEnviadoAsync_SegundaChamadaComRelogioAvancado_NaoSobrescreveDataDaPrimeira()
+    {
+        var primeiraChamada = new DateTime(2026, 10, 1, 9, 0, 0);
+        var segundaChamada = new DateTime(2026, 10, 1, 9, 30, 0); // relógio avançou 30 min
+        var agendamento = new Kura.Domain.Entities.Agendamento
+        {
+            Id = 1, IdClinica = 1, StStatus = "AGENDADO", NrVersion = 0, DtLembreteConfirmacao = null
+        };
+
+        _agendamentoRepoMock.Setup(r => r.GetByIdComTutorAsync(1)).ReturnsAsync(agendamento);
+        _relogioClinicaMock.SetupSequence(r => r.Agora())
+            .Returns(primeiraChamada)
+            .Returns(segundaChamada);
+
+        var resultado1 = await _sut.RegistrarLembreteEnviadoAsync(1);
+        var resultado2 = await _sut.RegistrarLembreteEnviadoAsync(1);
+
+        resultado1.DtLembreteConfirmacao.Should().Be(primeiraChamada);
+        resultado2.DtLembreteConfirmacao.Should().Be(primeiraChamada,
+            "a 2a chamada não deve reescrever com o horário da 2a chamada (segundaChamada)");
+        agendamento.NrVersion.Should().Be(1, "só a 1a chamada escreve de verdade");
+        _uowMock.Verify(u => u.CommitAsync(), Times.Once);
+    }
+
+    [Fact]
+    public async Task RegistrarLembreteEnviadoAsync_AgendamentoInexistente_Lanca404()
+    {
+        _agendamentoRepoMock.Setup(r => r.GetByIdComTutorAsync(999))
+            .ReturnsAsync((Kura.Domain.Entities.Agendamento?)null);
+
+        var act = async () => await _sut.RegistrarLembreteEnviadoAsync(999);
+
+        await act.Should().ThrowAsync<EntidadeNaoEncontradaException>();
+    }
+
+    // ── REC-15: RegistrarRespostaConfirmacaoAsync ───────────────────────────
+
+    private const string MarcadorSensivel = "MARCADOR_LGPD_whatsapp_x7f3";
+
+    [Fact]
+    public async Task RegistrarRespostaConfirmacaoAsync_TutorDeOutroTutor_Lanca422SemMudarNada()
+    {
+        // Arrange — aceite literal: "telefone de outro tutor ⇒ 422 sem mudar nada".
+        var agendamento = new Kura.Domain.Entities.Agendamento
+        {
+            Id = 1, IdClinica = 1, IdTutor = 7, StStatus = "AGENDADO", NrVersion = 0,
+            DsRespostaConfirmacao = null
+        };
+        _agendamentoRepoMock.Setup(r => r.GetByIdComTutorAsync(1)).ReturnsAsync(agendamento);
+
+        var dto = new RespostaConfirmacaoRequestDto { IdTutor = 999, Resposta = "SIM" };
+
+        // Act
+        var act = async () => await _sut.RegistrarRespostaConfirmacaoAsync(1, dto);
+
+        // Assert
+        await act.Should().ThrowAsync<RegraDeNegocioException>();
+        agendamento.StStatus.Should().Be("AGENDADO", "nada deve mudar quando o tutor não bate");
+        agendamento.DsRespostaConfirmacao.Should().BeNull();
+        agendamento.NrVersion.Should().Be(0);
+        _uowMock.Verify(u => u.CommitAsync(), Times.Never);
+        _agendamentoRepoMock.Verify(r => r.Update(It.IsAny<Kura.Domain.Entities.Agendamento>()), Times.Never);
+    }
+
+    /// <summary>
+    /// A-7 — mesma checagem acima, mas cruzando CLÍNICAS: o tutor da clínica 2 tenta
+    /// responder ao agendamento da clínica 1 (ele não é o tutor daquele agendamento,
+    /// que é o ponto — prova que a fronteira real é id_tutor, não uma coincidência de
+    /// id_clinica que um filtro de clínica sozinho poderia mascarar).
+    /// </summary>
+    [Fact]
+    public async Task RegistrarRespostaConfirmacaoAsync_TutorDeOutraClinica_Lanca422SemMudarNada()
+    {
+        var agendamentoClinica1 = new Kura.Domain.Entities.Agendamento
+        {
+            Id = 1, IdClinica = 1, IdTutor = 7, StStatus = "AGENDADO", NrVersion = 0
+        };
+        _agendamentoRepoMock.Setup(r => r.GetByIdComTutorAsync(1)).ReturnsAsync(agendamentoClinica1);
+
+        var tutorClinica2Id = 8L;
+        var dto = new RespostaConfirmacaoRequestDto { IdTutor = tutorClinica2Id, Resposta = "SIM" };
+
+        var act = async () => await _sut.RegistrarRespostaConfirmacaoAsync(1, dto);
+
+        await act.Should().ThrowAsync<RegraDeNegocioException>();
+        agendamentoClinica1.StStatus.Should().Be("AGENDADO");
+        agendamentoClinica1.IdClinica.Should().Be(1, "o agendamento não deve ser reatribuído a outra clínica");
+        _uowMock.Verify(u => u.CommitAsync(), Times.Never);
+    }
+
+    [Fact]
+    public async Task RegistrarRespostaConfirmacaoAsync_AgendamentoJaCancelado_Lanca422()
+    {
+        var agendamento = new Kura.Domain.Entities.Agendamento
+        {
+            Id = 1, IdClinica = 1, IdTutor = 7, StStatus = "CANCELADO", NrVersion = 2
+        };
+        _agendamentoRepoMock.Setup(r => r.GetByIdComTutorAsync(1)).ReturnsAsync(agendamento);
+
+        var dto = new RespostaConfirmacaoRequestDto { IdTutor = 7, Resposta = "SIM" };
+
+        var act = async () => await _sut.RegistrarRespostaConfirmacaoAsync(1, dto);
+
+        await act.Should().ThrowAsync<RegraDeNegocioException>();
+        agendamento.StStatus.Should().Be("CANCELADO");
+        _uowMock.Verify(u => u.CommitAsync(), Times.Never);
+    }
+
+    [Fact]
+    public async Task RegistrarRespostaConfirmacaoAsync_Sim_MudaStatusParaConfirmado()
+    {
+        var agendamento = new Kura.Domain.Entities.Agendamento
+        {
+            Id = 1, IdClinica = 1, IdTutor = 7, StStatus = "AGENDADO", NrVersion = 0
+        };
+        _agendamentoRepoMock.Setup(r => r.GetByIdComTutorAsync(1)).ReturnsAsync(agendamento);
+        _relogioClinicaMock.Setup(r => r.Agora()).Returns(new DateTime(2026, 10, 1, 8, 0, 0));
+
+        var dto = new RespostaConfirmacaoRequestDto { IdTutor = 7, Resposta = "SIM" };
+
+        var resultado = await _sut.RegistrarRespostaConfirmacaoAsync(1, dto);
+
+        resultado.DsStatus.Should().Be("CONFIRMADO");
+        agendamento.StStatus.Should().Be("CONFIRMADO");
+        agendamento.DsRespostaConfirmacao.Should().Be("SIM");
+        agendamento.NrVersion.Should().Be(1);
+        _uowMock.Verify(u => u.CommitAsync(), Times.Once);
+    }
+
+    [Fact]
+    public async Task RegistrarRespostaConfirmacaoAsync_Cancelar_MudaStatusParaCancelado()
+    {
+        var agendamento = new Kura.Domain.Entities.Agendamento
+        {
+            Id = 1, IdClinica = 1, IdTutor = 7, StStatus = "CONFIRMADO", NrVersion = 1
+        };
+        _agendamentoRepoMock.Setup(r => r.GetByIdComTutorAsync(1)).ReturnsAsync(agendamento);
+        _relogioClinicaMock.Setup(r => r.Agora()).Returns(new DateTime(2026, 10, 1, 8, 0, 0));
+
+        var dto = new RespostaConfirmacaoRequestDto { IdTutor = 7, Resposta = "CANCELAR" };
+
+        var resultado = await _sut.RegistrarRespostaConfirmacaoAsync(1, dto);
+
+        resultado.DsStatus.Should().Be("CANCELADO");
+        agendamento.StStatus.Should().Be("CANCELADO");
+        _uowMock.Verify(u => u.CommitAsync(), Times.Once);
+    }
+
+    /// <summary>
+    /// Mordida do aceite "REMARCAR não muda ST_STATUS": depois de REMARCAR, o
+    /// ST_STATUS continua exatamente o que era antes (comparado, não só "não deu
+    /// erro"). Removendo o `case "REMARCAR"` especial (deixando cair no mesmo
+    /// caminho de SIM/CANCELAR) este teste fica vermelho.
+    /// </summary>
+    [Fact]
+    public async Task RegistrarRespostaConfirmacaoAsync_Remarcar_NaoMudaStStatus_SoRegistraOPedido()
+    {
+        // Fix wave G2 (m-1): fixture trocado de "CONFIRMADO" para "AGENDADO" — é o
+        // ÚNICO estado que GetConfirmacaoPendenteAsync de fato lista para a Luna (o
+        // pipeline D-1 real entrega AGENDADO, nunca CONFIRMADO, a resposta-confirmacao).
+        // Com "CONFIRMADO", uma mutação que reatribuísse acidentalmente o MESMO valor
+        // do fixture (StStatus = "CONFIRMADO") passava despercebida (EXIT=0) — medido
+        // pela G2. Com "AGENDADO", essa classe de mutação-no-op fica impossível.
+        var agendamento = new Kura.Domain.Entities.Agendamento
+        {
+            Id = 1, IdClinica = 1, IdTutor = 7, StStatus = "AGENDADO", NrVersion = 3
+        };
+        var statusAntes = agendamento.StStatus;
+        _agendamentoRepoMock.Setup(r => r.GetByIdComTutorAsync(1)).ReturnsAsync(agendamento);
+        _relogioClinicaMock.Setup(r => r.Agora()).Returns(new DateTime(2026, 10, 1, 8, 0, 0));
+
+        var dto = new RespostaConfirmacaoRequestDto { IdTutor = 7, Resposta = "REMARCAR" };
+
+        var resultado = await _sut.RegistrarRespostaConfirmacaoAsync(1, dto);
+
+        agendamento.StStatus.Should().Be(statusAntes, "REMARCAR não transiciona ST_STATUS (A-10/b)");
+        resultado.DsStatus.Should().Be(statusAntes);
+        agendamento.DsRespostaConfirmacao.Should().Be("REMARCAR");
+        agendamento.DtRespostaConfirmacao.Should().NotBeNull();
+        _uowMock.Verify(u => u.CommitAsync(), Times.Once);
+    }
+
+    [Fact]
+    public async Task RegistrarRespostaConfirmacaoAsync_AgendamentoInexistente_Lanca404()
+    {
+        _agendamentoRepoMock.Setup(r => r.GetByIdComTutorAsync(999))
+            .ReturnsAsync((Kura.Domain.Entities.Agendamento?)null);
+
+        var dto = new RespostaConfirmacaoRequestDto { IdTutor = 7, Resposta = "SIM" };
+
+        var act = async () => await _sut.RegistrarRespostaConfirmacaoAsync(999, dto);
+
+        await act.Should().ThrowAsync<EntidadeNaoEncontradaException>();
+    }
+
+    /// <summary>
+    /// LGPD — lição do A4 (CLAUDE.md): nenhuma exceção deste caminho pode interpolar
+    /// dado sensível do tutor na Message (que vira title do RFC 7807 e é logada pelo
+    /// middleware). Este endpoint nunca recebe telefone no corpo (a Luna já resolveu o
+    /// tutor na entrada — só id_tutor trafega), mas o agendamento carrega o Tutor
+    /// completo (DsWhatsapp incluso) via Include — a garantia aqui é que a mensagem de
+    /// erro usa só ids numéricos, nunca o objeto Tutor.
+    /// </summary>
+    [Fact]
+    public async Task RegistrarRespostaConfirmacaoAsync_TutorErrado_MensagemDeExcecaoNaoContemDadosSensiveisDoTutor()
+    {
+        var tutorComDadosSensiveis = TutorComWhatsapp(id: 7, dsWhatsapp: MarcadorSensivel, nmTutor: MarcadorSensivel);
+        var agendamento = new Kura.Domain.Entities.Agendamento
+        {
+            Id = 1, IdClinica = 1, IdTutor = 7, Tutor = tutorComDadosSensiveis, StStatus = "AGENDADO", NrVersion = 0
+        };
+        _agendamentoRepoMock.Setup(r => r.GetByIdComTutorAsync(1)).ReturnsAsync(agendamento);
+
+        var dto = new RespostaConfirmacaoRequestDto { IdTutor = 999, Resposta = "SIM" };
+
+        var act = async () => await _sut.RegistrarRespostaConfirmacaoAsync(1, dto);
+
+        var ex = await act.Should().ThrowAsync<RegraDeNegocioException>();
+        ex.Which.Message.Should().NotContain(MarcadorSensivel);
     }
 }

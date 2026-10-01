@@ -30,4 +30,21 @@ public interface ILunaService
         DateTime? dataFim,
         int page,
         int pageSize);
+
+    /// <summary>
+    /// REC-15: GET /api/v1/luna/agendamentos/confirmacao-pendente?data=. SEM escopo de
+    /// clínica (API key, ver LunaService para a decisão completa).
+    /// </summary>
+    Task<IReadOnlyList<ConfirmacaoPendenteItemDto>> ListarConfirmacaoPendenteAsync(DateTime data);
+
+    /// <summary>
+    /// REC-15: POST /api/v1/luna/agendamentos/{id}/lembrete-enviado. Idempotente.
+    /// </summary>
+    Task<LembreteEnviadoResponseDto> RegistrarLembreteEnviadoAsync(long idAgendamento);
+
+    /// <summary>
+    /// REC-15: POST /api/v1/luna/agendamentos/{id}/resposta-confirmacao.
+    /// </summary>
+    Task<RespostaConfirmacaoResponseDto> RegistrarRespostaConfirmacaoAsync(
+        long idAgendamento, RespostaConfirmacaoRequestDto dto);
 }

@@ -37,5 +37,11 @@ public class ConsentimentoConfiguration : IEntityTypeConfiguration<Consentimento
         builder.Property(e => e.DtConsentimento)
             .HasColumnName("DT_ACEITE")
             .IsRequired();
+
+        // REC-15: coluna existe desde V1 (backend-tutor-java), lida agora pela 1a vez
+        // do lado .NET.
+        builder.Property(e => e.DtRevogacao)
+            .HasColumnName("DT_REVOGACAO")
+            .IsRequired(false);
     }
 }
