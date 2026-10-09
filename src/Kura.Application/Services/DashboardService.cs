@@ -102,8 +102,14 @@ public sealed class DashboardService : IDashboardService
 
         var hoje = DateTime.UtcNow.Date;
         var limite30Dias = hoje.AddDays(30);
+        // BE-01 -- Vacina NÃO declara IdClinica nem tem HasQueryFilter, e o filtro ambiente de
+        // EventoClinico não participa de um Where sobre Vacina que não navega até ele. O escopo
+        // vem do evento clínico dono da vacina, EXPLÍCITO (não depende do filtro ambiente, que
+        // desliga quando IdClinicaFiltro == null) -- mesmo padrão da FD-17.
+        var idClinica = _clinicaContext.IdClinica;
         var vacinas = await _vacinaRepository.FindAsync(
-            v => v.DtProximaDose.HasValue &&
+            v => v.EventoClinico.IdClinica == idClinica &&
+                 v.DtProximaDose.HasValue &&
                  v.DtProximaDose.Value.Date >= hoje &&
                  v.DtProximaDose.Value.Date <= limite30Dias);
 
