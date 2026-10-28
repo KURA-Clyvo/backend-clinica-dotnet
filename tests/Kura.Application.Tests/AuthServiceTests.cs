@@ -676,6 +676,42 @@ public class AuthServiceTests
         result.Usuario.NrTelefone.Should().BeNull("a resposta HTTP não deve mascarar o NULL como string vazia");
     }
 
+    [Theory]
+    [InlineData("58001200000149")]
+    [InlineData("58.001.200/0001-49")]
+    public async Task RegisterClinicaAsync_CnpjComOuSemMascara_GravaFormaCanonicaMascarada(string cnpjDigitado)
+    {
+        // Arrange (S4-FIX-02 / E67)
+        string? gravado = null;
+        string? consultadoNoDuplicado = null;
+        ArranjarRegistroFeliz(1, 1, aoSalvarClinica: c => gravado = c.NrCnpj);
+        _repoMock.Setup(r => r.ExisteComCnpjAsync(It.IsAny<string>()))
+            .Callback<string>(c => consultadoNoDuplicado = c).ReturnsAsync(false);
+        var dto = BuildDto();
+        dto.NrCnpj = cnpjDigitado;
+
+        // Act
+        await _sut.RegisterClinicaAsync(dto);
+
+        // Assert
+        gravado.Should().Be("58.001.200/0001-49");
+        consultadoNoDuplicado.Should().Be("58.001.200/0001-49");
+    }
+
+    [Fact]
+    public async Task RegisterClinicaAsync_CnpjInvalido_LancaRegraDeNegocioException()
+    {
+        // Arrange
+        var dto = BuildDto();
+        dto.NrCnpj = "1234567800019";
+
+        // Act
+        var act = () => _sut.RegisterClinicaAsync(dto);
+
+        // Assert
+        await act.Should().ThrowAsync<RegraDeNegocioException>().WithMessage("CNPJ inválido*");
+    }
+
     [Fact]
     public async Task RegisterClinicaAsync_CnpjDuplicado_LancaRegraDeNegocioException()
     {

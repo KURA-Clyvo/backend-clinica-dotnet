@@ -1,6 +1,7 @@
 namespace Kura.Application.Validators;
 
 using FluentValidation;
+using Kura.Domain.Clinicas;
 using Kura.Application.DTOs.Clinica;
 
 public sealed class ClinicaCreateValidator : AbstractValidator<ClinicaCreateDto>
@@ -13,8 +14,8 @@ public sealed class ClinicaCreateValidator : AbstractValidator<ClinicaCreateDto>
 
         RuleFor(x => x.NrCnpj)
             .NotEmpty()
-            .Matches(@"^\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}$")
-            .WithMessage("CNPJ deve estar no formato 00.000.000/0000-00");
+            .Must(c => NormalizadorCnpj.TentarNormalizar(c, out _))
+            .WithMessage("CNPJ inválido. Informe 14 dígitos, com ou sem máscara (00.000.000/0000-00).");
 
         RuleFor(x => x.DsEndereco)
             .NotEmpty()
