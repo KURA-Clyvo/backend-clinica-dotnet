@@ -115,4 +115,24 @@ public class AutorizacaoDeEscritaCoverageTests
                 a => a.Policy == PoliticasAutorizacao.SomenteGestor,
                 "usuarios-clinica não foi tocado pela D-13 — só a tabela de preços virou catálogo operacional");
     }
+
+    [Fact]
+    public void LaudosController_ExcluirExigeSomenteGestor_ECriarContinuaAbertoAoVeterinario()
+    {
+        // S4-NET-03: GESTOR e VETERINARIO enviam laudo; so o GESTOR exclui. A politica mora no
+        // METODO (o controller e [Authorize] simples), entao esquecer o atributo num DELETE novo
+        // o deixaria aberto a qualquer autenticado - mesmo risco da FD-15.
+        var excluir = typeof(LaudosController).GetMethod(nameof(LaudosController.Excluir))!;
+        excluir.GetCustomAttributes<AuthorizeAttribute>(inherit: true)
+            .Should().Contain(a => a.Policy == PoliticasAutorizacao.SomenteGestor);
+
+        VerbosDeEscritaDe(typeof(LaudosController))
+            .Where(m => m.Name != nameof(LaudosController.Criar))
+            .Where(m => !m.GetCustomAttributes<AuthorizeAttribute>(inherit: true)
+                          .Any(a => a.Policy == PoliticasAutorizacao.SomenteGestor))
+            .Select(m => m.Name)
+            .Should().BeEmpty("todo verbo de escrita de laudo, exceto o envio, e do GESTOR");
+
+        VerbosDeEscritaDe(typeof(LaudosController)).Should().Contain(m => m.Name == nameof(LaudosController.Criar));
+    }
 }

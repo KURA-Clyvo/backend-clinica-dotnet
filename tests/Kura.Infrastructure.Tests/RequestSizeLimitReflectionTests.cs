@@ -47,4 +47,19 @@ public class RequestSizeLimitReflectionTests
         typeof(PetsController).GetCustomAttribute<AuthorizeAttribute>()
             .Should().NotBeNull();
     }
+
+    [Fact]
+    public void LaudosCriar_DeclaraRequestSizeLimitDe10MiBMaisFolgaDeMultipart()
+    {
+        // S4-NET-03: o arquivo e de ate 10 MiB (validado a parte); o corpo ganha 256 KiB de folga
+        // para campos de texto e framing. Sob TestServer a rejeicao 413 nao e reproduzivel (ver
+        // acima), entao o atributo e provado aqui.
+        var metodo = typeof(LaudosController).GetMethod(nameof(LaudosController.Criar));
+
+        metodo.Should().NotBeNull();
+        var atributo = metodo!.GetCustomAttribute<RequestSizeLimitAttribute>();
+        atributo.Should().NotBeNull("sem [RequestSizeLimit] o Kestrel aceitaria upload de qualquer tamanho");
+        ((IRequestSizeLimitMetadata)atributo!).MaxRequestBodySize.Should().Be(10L * 1024 * 1024 + 256 * 1024);
+        LaudosController.LimiteCorpoUploadBytes.Should().BeGreaterThan(10L * 1024 * 1024);
+    }
 }
