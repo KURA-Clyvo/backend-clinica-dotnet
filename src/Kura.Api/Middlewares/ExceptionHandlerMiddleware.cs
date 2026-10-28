@@ -114,6 +114,12 @@ public class ExceptionHandlerMiddleware
             // sentido. 409 diferente da ConflitoConcorrenciaException acima (aquela é sobre
             // NR_VERSION/optimistic locking, mensagem errada para este caso).
             TutorComContaExistenteException => StatusCodes.Status409Conflict,
+            // S4-NET-03: o MongoDB de laudos fora do ar e infraestrutura indisponivel (503, o cliente
+            // pode tentar depois), nao erro do servidor (500) nem regra violada (422).
+            ArmazenamentoDocumentosIndisponivelException => StatusCodes.Status503ServiceUnavailable,
+            // S4-NET-03: o $jsonSchema do Mongo recusou o laudo (dado invalido, erro permanente). E
+            // DomainException mas NAO RegraDeNegocioException, entao precisa do case proprio.
+            LaudoRecusadoPeloSchemaException => StatusCodes.Status422UnprocessableEntity,
             UnauthorizedAccessException => StatusCodes.Status401Unauthorized,
             // FT-03 (backlog KURA_BACKLOG_FOTO_PET.md): o Kestrel lança esta exceção quando
             // o corpo da requisição excede o limite configurado por [RequestSizeLimit]
@@ -137,13 +143,26 @@ public class ExceptionHandlerMiddleware
         context.Response.StatusCode = statusCode;
         context.Response.ContentType = "application/problem+json";
 
-        var problem = new
+        // S4-NET-03: codigo estavel legivel por maquina, so para os casos que o cliente trata.
+        // O titulo do 503 e FIXO: a mensagem da excecao carrega o nome do tipo do driver, que nao
+        // e informacao para o cliente. O log acima NAO imprime conteudo de laudo: a excecao de
+        // schema tem mensagem fixa e nenhuma inner; a de indisponibilidade so carrega a falha de
+        // conexao do driver (credencial vem redigida pelo proprio driver - G2 da S4-NET-02).
+        var (codigo, titulo) = ex switch
         {
-            type = ex.GetType().Name,
-            title = ex.Message,
-            status = statusCode,
-            traceId = context.TraceIdentifier
+            ArmazenamentoDocumentosIndisponivelException =>
+                ("LAUDOS_INDISPONIVEL", "O armazenamento de laudos está indisponível no momento."),
+            _ => ((string?)null, ex.Message),
         };
+
+        var problem = new Dictionary<string, object?>
+        {
+            ["type"] = ex.GetType().Name,
+            ["title"] = titulo,
+            ["status"] = statusCode,
+            ["traceId"] = context.TraceIdentifier,
+        };
+        if (codigo is not null) problem["codigo"] = codigo;
 
         var bytes = JsonSerializer.SerializeToUtf8Bytes(problem);
         await context.Response.Body.WriteAsync(bytes);

@@ -69,7 +69,7 @@ public class PetsController : ControllerBase
     /// <returns>Dados do pet encontrado.</returns>
     /// <response code="200">Pet encontrado.</response>
     /// <response code="404">Pet não encontrado.</response>
-    [HttpGet("{id:long}")]
+    [HttpGet("{id:long}", Name = "ObterPet")]
     [ProducesResponseType(typeof(PetResponseDto), 200)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
     public async Task<IActionResult> GetById(long id)
