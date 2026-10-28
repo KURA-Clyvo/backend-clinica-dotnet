@@ -33,6 +33,10 @@ public static class ServiceCollectionExtensions
         // FT-03 (backlog KURA_BACKLOG_FOTO_PET.md): consome IArmazenamentoArquivos (FT-02),
         // registrado em AddInfrastructure.
         services.AddScoped<IPetFotoService, PetFotoService>();
+        // S4-NET-03: laudos (metadados no Mongo, arquivo no storage) + base HAL/paginacao da Api.
+        services.AddScoped<ILaudoService, LaudoService>();
+        services.AddScoped<Kura.Api.Hal.IHalLinkFactory, Kura.Api.Hal.HalLinkFactory>();
+        services.AddScoped<Kura.Api.Hal.LaudoHalMapper>();
 
         // GROUP C — Clinical events
         services.AddScoped<IEventoClinicoService, EventoClinicoService>();
