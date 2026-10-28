@@ -141,6 +141,14 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(TimeProvider.System);
         services.AddScoped<IGeradorUrlFotoPet, GeradorUrlFotoPet>();
 
+        // S4-NET-02: MongoDB (laudos). Sem Mongo:ConnectionString a API sobe normalmente; o
+        // runner de schema nunca derruba o host e o health `mongo` fica Degraded.
+        services.Configure<Kura.Infrastructure.Mongo.MongoOptions>(
+            configuration.GetSection(Kura.Infrastructure.Mongo.MongoOptions.Secao));
+        services.AddSingleton<Kura.Infrastructure.Mongo.MongoContext>();
+        services.AddSingleton<Kura.Domain.Interfaces.ILaudoRepository, Kura.Infrastructure.Mongo.LaudoRepository>();
+        services.AddHostedService<Kura.Infrastructure.Mongo.MongoSchemaRunner>();
+
         services.AddHttpClient<IDailyService, DailyService>((sp, http) =>
         {
             var apiKey = configuration["Daily:ApiKey"]
