@@ -15,8 +15,12 @@ public class LaudoRepositoryEscopoTests
     [Fact]
     public void Toda_operacao_do_repositorio_exige_long_idClinica()
     {
+        // GetMethods() de um tipo interface NAO devolve membros de interfaces herdadas (achado G2-I1):
+        // soma-se GetInterfaces() para que uma interface-base sem escopo (ex.: IRepository<T>) seja vista.
         var metodos = typeof(ILaudoRepository)
             .GetMethods(BindingFlags.Public | BindingFlags.Instance)
+            .Concat(typeof(ILaudoRepository).GetInterfaces()
+                .SelectMany(i => i.GetMethods(BindingFlags.Public | BindingFlags.Instance)))
             .ToList();
 
         metodos.Should().NotBeEmpty("o detector precisa enxergar métodos para a prova valer");
@@ -31,7 +35,9 @@ public class LaudoRepositoryEscopoTests
     [Fact]
     public void A_interface_nao_expoe_exclusao_fisica()
     {
-        typeof(ILaudoRepository).GetMethods().Select(m => m.Name)
+        typeof(ILaudoRepository).GetMethods()
+            .Concat(typeof(ILaudoRepository).GetInterfaces().SelectMany(i => i.GetMethods()))
+            .Select(m => m.Name)
             .Should().NotContain(n => n.Contains("Delete") || n.StartsWith("Remover"));
     }
 }

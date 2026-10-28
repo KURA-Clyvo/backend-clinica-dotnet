@@ -9,10 +9,13 @@ using MongoDB.Driver;
 /// <summary>
 /// Repositório concreto de laudos. O filtro SEMPRE começa por <c>idClinica</c> (e, na lista,
 /// <c>idPet</c>) e por <c>stAtivo=true</c>: não existe caminho de leitura sem escopo, e não
-/// existe <c>DeleteOne</c> (exclusão é lógica).
+/// existe <c>DeleteOne</c> (exclusão é lógica). Datas são convertidas para UTC de verdade
+/// (<see cref="LaudoDocument.ParaUtc"/>).
 /// </summary>
 public sealed class LaudoRepository : ILaudoRepository
 {
+    private const int CodigoFalhaDeValidacao = 121;
+
     private static readonly FilterDefinitionBuilder<LaudoDocument> F = Builders<LaudoDocument>.Filter;
     private static readonly SortDefinitionBuilder<LaudoDocument> S = Builders<LaudoDocument>.Sort;
 
@@ -25,6 +28,10 @@ public sealed class LaudoRepository : ILaudoRepository
         _time = time;
     }
 
+    /// <summary>
+    /// Resolve a coleção. Só é chamada de dentro de <see cref="Executar{T}"/>: connection string
+    /// malformada (<see cref="MongoConfigurationException"/>) vira "indisponível", não exceção crua.
+    /// </summary>
     private IMongoCollection<LaudoDocument> Colecao =>
         _ctx.Database.GetCollection<LaudoDocument>(MongoContext.ColecaoLaudos);
 
@@ -32,16 +39,25 @@ public sealed class LaudoRepository : ILaudoRepository
     {
         if (!ObjectId.TryParse(id, out _)) return null;
         var filtro = F.And(F.Eq(d => d.IdClinica, idClinica), F.Eq(d => d.Id, id), F.Eq(d => d.StAtivo, true));
-        var col = Colecao;
-        var doc = await Executar(() => col.Find(filtro).FirstOrDefaultAsync(ct));
+        var doc = await Executar(col => col.Find(filtro).FirstOrDefaultAsync(ct));
         return doc?.ParaDominio();
     }
 
     public async Task<PaginaLaudos> ListarPorPetAsync(
         long idClinica, long idPet, ConsultaLaudos consulta, CancellationToken ct = default)
     {
-        var pagina = Math.Max(1, consulta.Pagina);
-        var tamanho = Math.Clamp(consulta.TamanhoPagina, 1, 100);
+        var pagina = consulta.Pagina;
+        var tamanho = consulta.TamanhoPagina;
+        if (pagina < 1)
+            throw new ArgumentOutOfRangeException(nameof(consulta), pagina, "Pagina deve ser >= 1.");
+        if (tamanho is < 1 or > 100)
+            throw new ArgumentOutOfRangeException(nameof(consulta), tamanho, "TamanhoPagina deve estar entre 1 e 100.");
+        // Skip calculado em long (sem overflow). O driver só aceita Skip int: página cujo skip não cabe
+        // em int é recusada explicitamente em vez de virar valor negativo.
+        var skipLong = (long)(pagina - 1) * tamanho;
+        if (skipLong > int.MaxValue)
+            throw new ArgumentOutOfRangeException(nameof(consulta), pagina, "Pagina fora do alcance suportado.");
+        var skip = (int)skipLong;
 
         var filtros = new List<FilterDefinition<LaudoDocument>>
         {
@@ -50,16 +66,15 @@ public sealed class LaudoRepository : ILaudoRepository
             F.Eq(d => d.StAtivo, true),
         };
         if (consulta.Tipo is { } tipo) filtros.Add(F.Eq(d => d.Tipo, tipo));
-        if (consulta.DataDe is { } de) filtros.Add(F.Gte(d => d.DataExame, DateTime.SpecifyKind(de, DateTimeKind.Utc)));
-        if (consulta.DataAte is { } ate) filtros.Add(F.Lte(d => d.DataExame, DateTime.SpecifyKind(ate, DateTimeKind.Utc)));
+        if (consulta.DataDe is { } de) filtros.Add(F.Gte(d => d.DataExame, LaudoDocument.ParaUtc(de)));
+        if (consulta.DataAte is { } ate) filtros.Add(F.Lte(d => d.DataExame, LaudoDocument.ParaUtc(ate)));
         var filtro = F.And(filtros);
 
         var ordem = OrdenarPor(consulta.Ordem);
-        var col = Colecao;
-        var total = await Executar(() => col.CountDocumentsAsync(filtro, cancellationToken: ct));
-        var docs = await Executar(() => col.Find(filtro)
+        var total = await Executar(col => col.CountDocumentsAsync(filtro, cancellationToken: ct));
+        var docs = await Executar(col => col.Find(filtro)
             .Sort(ordem)
-            .Skip((pagina - 1) * tamanho)
+            .Skip(skip)
             .Limit(tamanho)
             .ToListAsync(ct));
 
@@ -78,8 +93,7 @@ public sealed class LaudoRepository : ILaudoRepository
         laudo.CriadoEm = agora;
         laudo.AtualizadoEm = agora;
 
-        var col = Colecao;
-        await Executar(async () =>
+        await Executar(async col =>
         {
             await col.InsertOneAsync(LaudoDocument.De(laudo), cancellationToken: ct);
             return 0;
@@ -96,8 +110,7 @@ public sealed class LaudoRepository : ILaudoRepository
             .Set(d => d.StAtivo, false)
             .Set(d => d.RemovidoEm, agora)
             .Set(d => d.AtualizadoEm, agora);
-        var col = Colecao;
-        var r = await Executar(() => col.UpdateOneAsync(filtro, update, cancellationToken: ct));
+        var r = await Executar(col => col.UpdateOneAsync(filtro, update, cancellationToken: ct));
         return r.MatchedCount > 0;
     }
 
@@ -112,16 +125,35 @@ public sealed class LaudoRepository : ILaudoRepository
         _ => S.Descending(d => d.DataExame).Descending(d => d.Id),
     };
 
-    private static async Task<T> Executar<T>(Func<Task<T>> op)
+    /// <summary>
+    /// Executa a operação convertendo em <see cref="ArmazenamentoDocumentosIndisponivelException"/>
+    /// SÓ falhas de conectividade/disponibilidade/configuração. Recusa do <c>$jsonSchema</c>
+    /// (código 121) vira <see cref="LaudoRecusadoPeloSchemaException"/> SEM a exceção interna: a
+    /// mensagem do driver traz <c>consideredValue</c> (conteúdo clínico). Demais
+    /// <see cref="MongoException"/> sobem como estão.
+    /// </summary>
+    private async Task<T> Executar<T>(Func<IMongoCollection<LaudoDocument>, Task<T>> op)
     {
         try
         {
-            return await op();
+            return await op(Colecao);
         }
-        catch (Exception ex) when (ex is MongoException or TimeoutException or System.Net.Sockets.SocketException)
+        catch (MongoWriteException ex) when (ex.WriteError?.Code == CodigoFalhaDeValidacao)
+        {
+            throw new LaudoRecusadoPeloSchemaException();
+        }
+        catch (Exception ex) when (EhFalhaDeDisponibilidade(ex))
         {
             throw new ArmazenamentoDocumentosIndisponivelException(
                 "Armazenamento de documentos indisponível: " + ex.GetType().Name, ex);
         }
     }
+
+    private static bool EhFalhaDeDisponibilidade(Exception ex) => ex is
+        MongoConnectionException            // inclui MongoAuthenticationException
+        or MongoNotPrimaryException
+        or MongoNodeIsRecoveringException
+        or MongoConfigurationException      // connection string malformada
+        or TimeoutException
+        or System.Net.Sockets.SocketException;
 }

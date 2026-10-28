@@ -4,10 +4,12 @@ using Kura.Domain.Laudos;
 
 /// <summary>
 /// Repositório de laudos (MongoDB). REGRA: <b>toda</b> operação recebe <c>long idClinica</c>
-/// e o aplica no filtro; não existe método sem escopo (travado por
-/// <c>LaudoRepositoryEscopoTests</c>, por reflexão). Não há exclusão física: exclusão é
-/// <c>stAtivo=false</c> + <c>removidoEm</c>. Falha de infraestrutura vira
-/// <see cref="Kura.Domain.Exceptions.ArmazenamentoDocumentosIndisponivelException"/>.
+/// e o aplica no filtro; não existe método sem escopo. A <b>assinatura</b> é travada por
+/// <c>LaudoRepositoryEscopoTests</c> (reflexão, inclui interfaces herdadas); o <b>uso</b> do
+/// <c>idClinica</c> no filtro é travado pelos testes de duas clínicas em <c>LaudoRepositoryTests</c>.
+/// Não há exclusão física: exclusão é <c>stAtivo=false</c> + <c>removidoEm</c>. Falha de
+/// conectividade vira <see cref="Kura.Domain.Exceptions.ArmazenamentoDocumentosIndisponivelException"/>;
+/// recusa do schema vira <see cref="Kura.Domain.Exceptions.LaudoRecusadoPeloSchemaException"/>.
 /// </summary>
 public interface ILaudoRepository
 {

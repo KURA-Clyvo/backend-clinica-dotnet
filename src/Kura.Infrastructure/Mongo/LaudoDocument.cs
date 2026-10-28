@@ -30,6 +30,21 @@ internal sealed class LaudoDocument
     [BsonElement("atualizadoEm"), BsonDateTimeOptions(Kind = DateTimeKind.Utc)] public DateTime AtualizadoEm { get; set; }
     [BsonElement("removidoEm"), BsonDateTimeOptions(Kind = DateTimeKind.Utc)] public DateTime? RemovidoEm { get; set; }
 
+    /// <summary>
+    /// Converte para UTC de verdade: <c>Local</c> => <c>ToUniversalTime()</c>; <c>Utc</c> fica como está;
+    /// <c>Unspecified</c> é tratado como UTC (decisão: a borda HTTP da S4-NET-03 entrega
+    /// <c>DateTimeOffset</c>/UTC, então um instante sem Kind já está em UTC).
+    /// </summary>
+    internal static DateTime ParaUtc(DateTime d, TimeZoneInfo? fusoLocal = null) => d.Kind switch
+    {
+        // fusoLocal só existe para teste fixar o fuso; em produção é o fuso do processo.
+        DateTimeKind.Local when fusoLocal is not null =>
+            TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(d, DateTimeKind.Unspecified), fusoLocal),
+        DateTimeKind.Local => d.ToUniversalTime(),
+        DateTimeKind.Utc => d,
+        _ => DateTime.SpecifyKind(d, DateTimeKind.Utc),
+    };
+
     public static LaudoDocument De(Laudo l) => new()
     {
         Id = l.Id,
@@ -39,7 +54,7 @@ internal sealed class LaudoDocument
         IdUsuarioAutor = l.IdUsuarioAutor,
         Tipo = l.Tipo,
         Titulo = l.Titulo,
-        DataExame = DateTime.SpecifyKind(l.DataExame, DateTimeKind.Utc),
+        DataExame = ParaUtc(l.DataExame),
         Laboratorio = l.Laboratorio,
         Observacao = l.Observacao,
         Dados = new BsonDocument(l.Dados.ToDictionary(k => k.Key, k => BsonTypeMapper.MapToBsonValue(k.Value))),
@@ -51,9 +66,9 @@ internal sealed class LaudoDocument
             Sha256 = l.Arquivo.Sha256,
         },
         StAtivo = l.StAtivo,
-        CriadoEm = DateTime.SpecifyKind(l.CriadoEm, DateTimeKind.Utc),
-        AtualizadoEm = DateTime.SpecifyKind(l.AtualizadoEm, DateTimeKind.Utc),
-        RemovidoEm = l.RemovidoEm is null ? null : DateTime.SpecifyKind(l.RemovidoEm.Value, DateTimeKind.Utc),
+        CriadoEm = ParaUtc(l.CriadoEm),
+        AtualizadoEm = ParaUtc(l.AtualizadoEm),
+        RemovidoEm = l.RemovidoEm is null ? null : ParaUtc(l.RemovidoEm.Value),
     };
 
     public Laudo ParaDominio() => new()

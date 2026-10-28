@@ -111,6 +111,54 @@ public class MongoSchemaRunnerTests(MongoFixture mongo)
         ix3.Names.Should().Equal("idPet", "stAtivo", "dataExame");
     }
 
+    // G2-m6: chaves E direções exatas dos 3 índices do G0 §5. Uma direção trocada derruba o ESR do
+    // sort padrão (dataExame desc, _id desc) e vira SORT em memória sem nenhum teste vermelho.
+    [Theory]
+    [InlineData("ix_laudo_clinica_pet_ativo_data", "idClinica:1,idPet:1,stAtivo:1,dataExame:-1,_id:-1")]
+    [InlineData("ix_laudo_clinica_pet_ativo_tipo_data", "idClinica:1,idPet:1,stAtivo:1,tipo:1,dataExame:-1,_id:-1")]
+    [InlineData("ix_laudo_pet_ativo_data", "idPet:1,stAtivo:1,dataExame:-1")]
+    public async Task Indices_tem_chaves_e_direcoes_exatas_do_contrato(string nome, string esperado)
+    {
+        var ctx = await ContextoComSchemaAsync();
+
+        var indices = await (await ctx.LaudosBruto.Indexes.ListAsync()).ToListAsync();
+        var chave = indices.Single(i => i["name"].AsString == nome)["key"].AsBsonDocument;
+
+        var real = string.Join(",", chave.Elements.Select(e => $"{e.Name}:{e.Value.ToInt32()}"));
+        real.Should().Be(esperado);
+    }
+
+    // G2-m6: os campos que o Java lê como long não podem afrouxar para int sem teste vermelho.
+    [Theory]
+    [InlineData("idClinica")]
+    [InlineData("idPet")]
+    [InlineData("idUsuarioAutor")]
+    [InlineData("idEventoClinico")]
+    [InlineData("arquivo.tamanhoBytes")]
+    public async Task Schema_recusa_Int32_nos_campos_long_do_contrato(string campo)
+    {
+        var ctx = await ContextoComSchemaAsync();
+        var doc = DocumentoValido();
+        if (campo.StartsWith("arquivo.")) doc["arquivo"][campo["arquivo.".Length..]] = 1;
+        else doc[campo] = 1; // Int32; o contrato exige long
+
+        var agir = () => ctx.LaudosBruto.InsertOneAsync(doc);
+
+        (await agir.Should().ThrowAsync<MongoWriteException>()).Which.WriteError.Code.Should().Be(121);
+    }
+
+    [Fact]
+    public async Task Schema_aceita_long_nos_campos_long_controle_positivo()
+    {
+        var ctx = await ContextoComSchemaAsync();
+        var doc = DocumentoValido();
+        doc["idEventoClinico"] = 5L;
+
+        var agir = () => ctx.LaudosBruto.InsertOneAsync(doc);
+
+        await agir.Should().NotThrowAsync();
+    }
+
     [Fact]
     public async Task Runner_roda_duas_vezes_sem_erro_e_sem_duplicar_indices()
     {
