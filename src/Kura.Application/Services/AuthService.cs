@@ -6,6 +6,7 @@ using System.Text;
 using Kura.Application.DTOs.Auth;
 using Kura.Application.DTOs.Veterinario;
 using Kura.Application.Services.Interfaces;
+using Kura.Domain.Clinicas;
 using Kura.Domain.Entities;
 using Kura.Domain.Exceptions;
 using Kura.Domain.Interfaces;
@@ -220,7 +221,11 @@ public sealed class AuthService : IAuthService
 
     public async Task<RegisterClinicaResponseDto> RegisterClinicaAsync(RegisterClinicaDto dto)
     {
-        if (await _clinicaRepository.ExisteComCnpjAsync(dto.NrCnpj))
+        // S4-FIX-02 (E67): forma canônica (mascarada) antes de checar duplicidade e antes de gravar.
+        if (!NormalizadorCnpj.TentarNormalizar(dto.NrCnpj, out var cnpjCanonico))
+            throw new RegraDeNegocioException("CNPJ inválido. Informe 14 dígitos, com ou sem máscara.");
+
+        if (await _clinicaRepository.ExisteComCnpjAsync(cnpjCanonico))
             throw new RegraDeNegocioException("Já existe uma clínica cadastrada com este CNPJ.");
 
         if (await _clinicaRepository.ExisteComEmailAcessoAsync(dto.DsEmailAcesso))
@@ -231,7 +236,7 @@ public sealed class AuthService : IAuthService
         var clinica = new Clinica
         {
             NmClinica = dto.NmClinica,
-            NrCnpj = dto.NrCnpj,
+            NrCnpj = cnpjCanonico,
             NmRazaoSocial = dto.NmRazaoSocial,
             DsEndereco = dto.DsEndereco,
             NmCidade = dto.NmCidade,

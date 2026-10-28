@@ -3,6 +3,7 @@ namespace Kura.Application.Services;
 using Kura.Application.DTOs.Clinica;
 using Kura.Application.DTOs.Veterinario;
 using Kura.Application.Services.Interfaces;
+using Kura.Domain.Clinicas;
 using Kura.Domain.Entities;
 using Kura.Domain.Exceptions;
 using Kura.Domain.Interfaces;
@@ -45,11 +46,16 @@ public sealed class ClinicaService : IClinicaService
 
     public async Task<ClinicaResponseDto> CreateAsync(ClinicaCreateDto dto)
     {
-        var cnpjDigitos = new string(dto.NrCnpj.Where(char.IsDigit).ToArray());
+        // S4-FIX-02 (E67): grava a forma canônica mascarada (antes gravava só dígitos).
+        if (!NormalizadorCnpj.TentarNormalizar(dto.NrCnpj, out var cnpjCanonico))
+            throw new RegraDeNegocioException("CNPJ inválido. Informe 14 dígitos, com ou sem máscara.");
+        if (await _repository.ExisteComCnpjAsync(cnpjCanonico))
+            throw new RegraDeNegocioException("Já existe uma clínica cadastrada com este CNPJ.");
+
         var clinica = new Clinica
         {
             NmClinica = dto.NmClinica,
-            NrCnpj = cnpjDigitos,
+            NrCnpj = cnpjCanonico,
             DsEndereco = dto.DsEndereco,
             NrTelefone = dto.NrTelefone,
             DsEmail = dto.DsEmail
