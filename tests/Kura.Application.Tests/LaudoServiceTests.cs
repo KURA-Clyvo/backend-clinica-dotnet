@@ -31,7 +31,7 @@ public class LaudoServiceTests
     {
         _clinica.SetupGet(c => c.IdClinica).Returns(IdClinica);
         _pets.Setup(p => p.GetByIdComVinculosAsync(10, IdClinica)).ReturnsAsync(new Pet { Id = 10, IdClinica = IdClinica });
-        _usuarios.Setup(u => u.BuscarPorEmailNaClinicaAsync(IdClinica, Email, null))
+        _usuarios.Setup(u => u.BuscarAtivoPorEmailNaClinicaAsync(IdClinica, Email))
             .ReturnsAsync(new UsuarioClinica { Id = 77, IdClinica = IdClinica, DsEmail = Email });
         _laudos.Setup(l => l.InserirAsync(IdClinica, It.IsAny<Laudo>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((long _, Laudo l, CancellationToken _) => { l.Id = "671f00000000000000000001"; return l; });
@@ -164,6 +164,51 @@ public class LaudoServiceTests
         serie[3].Should().BeOfType<Dictionary<string, object?>>();
         // Nenhum JsonElement sobrevive: era ele que dava ArgumentException cru no repositorio (G2-m3).
         d.Values.Should().NotContain(v => v is System.Text.Json.JsonElement);
+    }
+
+    [Fact]
+    public async Task CriarAsync_ArquivoAcimaDe10MiB_Lanca422_SemDependerDoValidador()
+    {
+        // G2-m1: defesa em profundidade (D-NET-1). O service barra sozinho.
+        var grande = new byte[(10 * 1024 * 1024) + 1];
+        PdfMinimo.CopyTo(grande, 0);
+
+        var act = () => _sut.CriarAsync(10, Dto(arquivo: grande), Email, CancellationToken.None);
+
+        await act.Should().ThrowAsync<RegraDeNegocioException>().WithMessage("*10 MiB*");
+        _storage.Verify(s => s.SalvarAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CriarAsync_ArquivoVazio_Lanca422()
+    {
+        var act = () => _sut.CriarAsync(10, Dto(arquivo: []), Email, CancellationToken.None);
+
+        await act.Should().ThrowAsync<RegraDeNegocioException>();
+    }
+
+    [Fact]
+    public async Task CriarAsync_UsuarioDesativado_Lanca401_PoisSoOLookupDeAtivosEhUsado()
+    {
+        // G2-m2: o service usa o lookup de ATIVOS; o antigo (que enxerga desativado) nunca e chamado.
+        _usuarios.Setup(u => u.BuscarAtivoPorEmailNaClinicaAsync(IdClinica, "off@x.test")).ReturnsAsync((UsuarioClinica?)null);
+
+        var act = () => _sut.CriarAsync(10, Dto(), "off@x.test", CancellationToken.None);
+
+        await act.Should().ThrowAsync<UnauthorizedAccessException>();
+        _usuarios.Verify(u => u.BuscarPorEmailNaClinicaAsync(It.IsAny<long>(), It.IsAny<string>(), It.IsAny<long?>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("""{"x":1e400}""")]
+    [InlineData("""{"x":-1e400}""")]
+    [InlineData("""{"a\u0000b":1}""")]
+    public async Task CriarAsync_DadosNaoFinitoOuChaveComNul_Lanca422ENaoGrava(string dados)
+    {
+        var act = () => _sut.CriarAsync(10, Dto(dados: dados), Email, CancellationToken.None);
+
+        await act.Should().ThrowAsync<RegraDeNegocioException>();
+        _storage.Verify(s => s.SalvarAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

@@ -24,6 +24,10 @@ public interface IHalLinkFactory
     /// ENTENDIDOS (filtros, sort, mais valores de rota como <c>idPet</c>) — repassados a todos os
     /// links, para que paginar nunca perca filtro nem ordenação. <c>prev</c>/<c>next</c> só existem
     /// quando existem.
+    ///
+    /// <para><b>Total zero (G2-m5):</b> <c>totalPages=0</c> e o envelope traz só <c>self</c> e
+    /// <c>first</c> — sem <c>last</c>, <c>prev</c> nem <c>next</c>, porque não há página real para
+    /// apontar. A S4-NET-04 (listas v2) herda esta regra.</para>
     /// </summary>
     PaginaHalDto<T> MontarPagina<T>(
         IReadOnlyList<T> itens, int pagina, int tamanhoPagina, long total,
@@ -74,9 +78,10 @@ public sealed class HalLinkFactory : IHalLinkFactory
         {
             ["self"] = Para(pagina),
             ["first"] = Para(1),
-            ["last"] = Para(ultima),
         };
-        if (pagina > 1) links["prev"] = Para(Math.Min(pagina - 1, ultima));
+        // G2-m5: total=0 => totalPages=0 e SEM last (não existe última página para apontar).
+        if (totalPaginas > 0) links["last"] = Para(ultima);
+        if (pagina > 1 && totalPaginas > 0) links["prev"] = Para(Math.Min(pagina - 1, ultima));
         if (pagina < totalPaginas) links["next"] = Para(pagina + 1);
 
         return new PaginaHalDto<T>

@@ -7,6 +7,12 @@ namespace Kura.Application.Services;
 ///
 /// <para>A regra de imagem NÃO é duplicada: este tipo delega a <see cref="ValidadorAssinaturaImagem.Detectar"/>
 /// e só acrescenta o PDF. O <c>Content-Type</c> gravado vem sempre daqui.</para>
+///
+/// <para><b>Limite declarado (G2-m3):</b> só o <b>cabeçalho</b> é verificado (<c>%PDF-</c> ou a
+/// assinatura da imagem); o resto do arquivo não é analisado, então um arquivo que começa com
+/// <c>%PDF-</c> e continua com lixo/HTML é aceito. O risco é contido na SAÍDA, não aqui:
+/// download com <c>Content-Disposition: attachment</c>, <c>X-Content-Type-Options: nosniff</c> e
+/// <c>Content-Type</c> fixo tirado do mapa fechado (nunca do cliente).</para>
 /// </summary>
 public static class ValidadorAssinaturaDocumento
 {

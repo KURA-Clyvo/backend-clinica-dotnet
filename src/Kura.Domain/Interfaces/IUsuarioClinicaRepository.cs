@@ -86,6 +86,13 @@ public interface IUsuarioClinicaRepository : IRepository<UsuarioClinica>
         long idClinica, string email, long? excetoId = null);
 
     /// <summary>
+    /// Como <see cref="BuscarPorEmailNaClinicaAsync"/>, mas só devolve usuário <b>ATIVO</b>
+    /// (S4-NET-03, G2-m2: token ainda válido de usuário desativado não pode criar laudo).
+    /// Método próprio de propósito: o outro precisa enxergar o desativado (UK do e-mail).
+    /// </summary>
+    Task<UsuarioClinica?> BuscarAtivoPorEmailNaClinicaAsync(long idClinica, string email);
+
+    /// <summary>
     /// FD-04 — quantos <c>GESTOR</c> ATIVOS a clínica tem, <b>excluindo</b> opcionalmente um
     /// id (o usuário que a operação em curso está prestes a rebaixar ou desativar).
     ///

@@ -96,6 +96,12 @@ public class UsuarioClinicaRepository : Repository<UsuarioClinica>, IUsuarioClin
                                    && (excetoId == null || u.Id != excetoId));
 
     /// <inheritdoc />
+    public async Task<UsuarioClinica?> BuscarAtivoPorEmailNaClinicaAsync(long idClinica, string email) =>
+        await _dbSet
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(u => u.IdClinica == idClinica && u.DsEmail == email && u.StAtiva);
+
+    /// <inheritdoc />
     public async Task<int> ContarGestoresAtivosAsync(long idClinica, long? excetoId = null) =>
         await _dbSet
             .IgnoreQueryFilters()

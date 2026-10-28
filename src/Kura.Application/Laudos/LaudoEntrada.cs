@@ -65,17 +65,25 @@ public static class LaudoEntrada
             dados = ConverterObjeto(doc.RootElement);
             return true;
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or DadosInvalidosException)
         {
             return false;
         }
     }
 
+    /// <summary>Valor ou chave que o JSON aceita mas o BSON/serializador de resposta não (G2-I1).</summary>
+    private sealed class DadosInvalidosException(string mensagem) : Exception(mensagem);
+
     private static Dictionary<string, object?> ConverterObjeto(JsonElement objeto)
     {
         var d = new Dictionary<string, object?>();
         foreach (var p in objeto.EnumerateObject())
+        {
+            // G2-I1: o driver BSON recusa NUL em nome de elemento com ArgumentException crua (500).
+            // '$', '.' e chave vazia o mongod 8 aceita e devolve (sondado pela G2), então ficam.
+            if (p.Name.Contains((char)0)) throw new DadosInvalidosException("Chave com NUL.");
             d[p.Name] = Converter(p.Value); // chave repetida: vale a última, como no parser do JSON
+        }
         return d;
     }
 
@@ -84,9 +92,14 @@ public static class LaudoEntrada
         JsonValueKind.Object => ConverterObjeto(e),
         JsonValueKind.Array => e.EnumerateArray().Select(Converter).ToList(),
         JsonValueKind.String => e.GetString(),
-        JsonValueKind.Number => e.TryGetInt64(out var l) ? l : e.GetDouble(),
+        JsonValueKind.Number => e.TryGetInt64(out var l) ? l : NumeroFinito(e.GetDouble()),
         JsonValueKind.True => true,
         JsonValueKind.False => false,
         _ => null,
     };
+
+    // G2-I1: 1e400 vira ±Infinity no double; o Mongo guarda e o System.Text.Json não serializa de
+    // volta, o que envenenava a lista de laudos do pet (500 em todo GET).
+    private static double NumeroFinito(double v) =>
+        double.IsFinite(v) ? v : throw new DadosInvalidosException("Número não finito.");
 }

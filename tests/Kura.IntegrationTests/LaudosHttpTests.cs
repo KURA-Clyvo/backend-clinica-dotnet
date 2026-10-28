@@ -11,6 +11,7 @@ using Kura.Domain.Interfaces;
 using Kura.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 /// <summary>
@@ -386,6 +387,90 @@ public class LaudosHttpTests : IClassFixture<LaudosFixture>
         {
             _fx.Laudos.FalhaDeAcesso = null;
         }
+    }
+
+    // ───────── fix wave G2 ─────────
+
+    [Theory]
+    [InlineData("""{"x":1e400}""")]
+    [InlineData("""{"x":-1e400}""")]
+    [InlineData("""{"a":{"b":[1,1e999]}}""")]
+    [InlineData("""{"a\u0000b":1}""")]
+    public async Task Post_DadosComNumeroNaoFinitoOuChaveComNul_Devolve400_NadaGravado_ListaContinua200(string dados)
+    {
+        // G2-I1: 1e400 virava Infinity no Mongo e envenenava o GET da lista do pet (500).
+        var vet = await _fx.ClienteAsync(KuraApiFactory.EmailClinica);
+        var petId = await NovoPetAsync();
+        var antes = _fx.Storage.Quantidade;
+
+        var r = await vet.PostAsync($"/api/v1/pets/{petId}/laudos", Form(dados: dados));
+
+        r.StatusCode.Should().Be(HttpStatusCode.BadRequest, await r.Content.ReadAsStringAsync());
+        _fx.Storage.Quantidade.Should().Be(antes);
+        var lista = await vet.GetAsync($"/api/v1/pets/{petId}/laudos");
+        lista.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await Json(lista)).GetProperty("total").GetInt64().Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Post_UsuarioDesativadoComTokenAindaValido_Devolve401_ENadaGravado()
+    {
+        // G2-m2: antes o POST dava 201 com idUsuarioAutor do usuario desativado.
+        using (var escopo = _fx.Factory.Services.CreateScope())
+        {
+            var db = escopo.ServiceProvider.GetRequiredService<KuraDbContext>();
+            db.UsuariosClinica.Add(new UsuarioClinica
+            {
+                Id = 901, IdClinica = KuraApiFactory.IdClinicaOutroTenant, IdVeterinario = null,
+                DsEmail = "desativado-b@kura.test", DsSenhaHash = BCrypt.Net.BCrypt.HashPassword(KuraApiFactory.SenhaClinica),
+                TpPerfil = PerfisUsuarioClinica.Gestor, StAtiva = true,
+            });
+            await db.SaveChangesAsync();
+        }
+        var cliente = await _fx.ClienteAsync("desativado-b@kura.test"); // token emitido enquanto ativo
+        using (var escopo = _fx.Factory.Services.CreateScope())
+        {
+            var db = escopo.ServiceProvider.GetRequiredService<KuraDbContext>();
+            (await db.UsuariosClinica.IgnoreQueryFilters().FirstAsync(u => u.Id == 901)).StAtiva = false;
+            await db.SaveChangesAsync();
+        }
+        var antes = _fx.Storage.Quantidade;
+
+        var r = await cliente.PostAsync($"/api/v1/pets/{_fx.PetB}/laudos", Form());
+
+        r.StatusCode.Should().Be(HttpStatusCode.Unauthorized, await r.Content.ReadAsStringAsync());
+        _fx.Storage.Quantidade.Should().Be(antes);
+    }
+
+    [Fact]
+    public async Task Lista_SemNenhumLaudo_TemTotalPagesZero_SoSelfEFirst()
+    {
+        // G2-m5: sem laudo nao ha "ultima pagina": sem last/prev/next.
+        var vet = await _fx.ClienteAsync(KuraApiFactory.EmailClinica);
+        var petId = await NovoPetAsync();
+
+        foreach (var query in new[] { "", "?page=3" })
+        {
+            var envelope = await Json(await vet.GetAsync($"/api/v1/pets/{petId}/laudos{query}"));
+
+            envelope.GetProperty("total").GetInt64().Should().Be(0);
+            envelope.GetProperty("totalPages").GetInt32().Should().Be(0);
+            envelope.GetProperty("_links").EnumerateObject().Select(l => l.Name).Should().BeEquivalentTo("self", "first");
+        }
+    }
+
+    [Theory]
+    [InlineData("/api/v1/pets")]
+    [InlineData("/api/v1/tutores")]
+    public async Task ListasV1DePetsETutores_ContinuamSendoArrayPuro(string rota)
+    {
+        // G2-m4 / D-NET-4: a S4-NET-04 cria listas v2 SEM mudar o shape da v1.
+        var vet = await _fx.ClienteAsync(KuraApiFactory.EmailClinica);
+
+        var r = await vet.GetAsync(rota);
+
+        r.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await Json(r)).ValueKind.Should().Be(JsonValueKind.Array);
     }
 
     private async Task<long> NovoPetAsync()

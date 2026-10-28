@@ -131,4 +131,28 @@ public class ValidadorAssinaturaDocumentoTests
         PdfMinimo.CopyTo(grande, 0);
         Validar(Valido(arquivo: grande)).Errors.Should().Contain(e => e.ErrorMessage.Contains("10 MiB"));
     }
+
+    // ───────── G2-I1: dados que o JSON aceita e o BSON/serializador nao ─────────
+
+    [Theory]
+    [InlineData("""{"x":1e400}""")]
+    [InlineData("""{"x":-1e400}""")]
+    [InlineData("""{"a":{"b":[1,{"c":1e999}]}}""")]
+    [InlineData("""{"a\u0000b":1}""")]
+    [InlineData("""{"fundo":{"c\u0000":1}}""")]
+    [InlineData("""{"lista":[{"\u0000":1}]}""")]
+    public void TentarDados_NumeroNaoFinitoOuChaveComNul_Recusa(string json) =>
+        Kura.Application.Laudos.LaudoEntrada.TentarDados(json, out _).Should().BeFalse();
+
+    [Theory]
+    [InlineData("""{"x":1.7976931348623157e308}""")]   // maior double finito
+    [InlineData("""{"$where":1}""")]                    // mongod 8 aceita e devolve (sondado pela G2)
+    [InlineData("""{"a.b":1}""")]
+    [InlineData("""{"":1}""")]
+    public void TentarDados_ValoresQueOMongoAceita_Continuam(string json) =>
+        Kura.Application.Laudos.LaudoEntrada.TentarDados(json, out _).Should().BeTrue();
+
+    [Fact]
+    public void Validador_DadosComNumeroNaoFinito_Recusa() =>
+        Validar(Valido(c => c["dados"] = """{"x":1e400}""")).Errors.Should().Contain(e => e.PropertyName == "Dados");
 }

@@ -5,6 +5,7 @@ using Kura.Application.DTOs.Common;
 using Kura.Application.DTOs.Laudo;
 using Kura.Application.Laudos;
 using Kura.Application.Services.Interfaces;
+using Kura.Application.Validators;
 using Kura.Domain.Exceptions;
 using Kura.Domain.Interfaces;
 using Kura.Domain.Laudos;
@@ -52,12 +53,15 @@ public sealed class LaudoService : ILaudoService
 
         if (string.IsNullOrWhiteSpace(emailAutor))
             throw new UnauthorizedAccessException("Claim 'email' ausente no token JWT.");
-        var autor = await _usuarios.BuscarPorEmailNaClinicaAsync(idClinica, emailAutor)
-            ?? throw new UnauthorizedAccessException("Usuário do token não encontrado na clínica.");
+        var autor = await _usuarios.BuscarAtivoPorEmailNaClinicaAsync(idClinica, emailAutor)
+            ?? throw new UnauthorizedAccessException("Usuário do token não encontrado (ou desativado) na clínica.");
 
         // Defesa em profundidade: o controller já validou (LaudoCriarValidator). Aqui a mesma
         // regra é reaplicada porque o service não deve confiar em nunca ser chamado sem ela.
         var arquivo = dto.Arquivo ?? throw new RegraDeNegocioException("Arquivo do laudo é obrigatório.");
+        // G2-m1: o teto de 10 MiB também vale aqui (D-NET-1), não só no validador.
+        if (arquivo.Length == 0 || arquivo.Length > LaudoCriarValidator.TamanhoMaximoBytes)
+            throw new RegraDeNegocioException("Arquivo do laudo deve ter entre 1 byte e 10 MiB.");
         var formato = ValidadorAssinaturaDocumento.Detectar(arquivo)
             ?? throw new RegraDeNegocioException("Arquivo não é um PDF, JPEG, PNG ou WebP válido.");
         if (!LaudoEntrada.TentarTipo(dto.Tipo, out var tipo)
