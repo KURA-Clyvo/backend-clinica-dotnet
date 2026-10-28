@@ -1,0 +1,33 @@
+{
+  "bsonType": "object",
+  "required": ["_id", "idClinica", "idPet", "idUsuarioAutor", "tipo", "titulo", "dataExame", "dados", "arquivo", "stAtivo", "criadoEm", "atualizadoEm"],
+  "additionalProperties": false,
+  "properties": {
+    "_id": { "bsonType": "objectId" },
+    "idClinica": { "bsonType": "long" },
+    "idPet": { "bsonType": "long" },
+    "idEventoClinico": { "bsonType": ["long", "null"] },
+    "idUsuarioAutor": { "bsonType": "long" },
+    "tipo": { "enum": ["HEMOGRAMA", "BIOQUIMICO", "IMAGEM", "RECEITA", "OUTRO"] },
+    "titulo": { "bsonType": "string", "minLength": 1, "maxLength": 120 },
+    "dataExame": { "bsonType": "date" },
+    "laboratorio": { "bsonType": ["string", "null"], "maxLength": 120 },
+    "observacao": { "bsonType": ["string", "null"], "maxLength": 1000 },
+    "dados": { "bsonType": "object" },
+    "arquivo": {
+      "bsonType": "object",
+      "required": ["chave", "contentType", "tamanhoBytes", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "chave": { "bsonType": "string", "minLength": 1 },
+        "contentType": { "enum": ["application/pdf", "image/jpeg", "image/png", "image/webp"] },
+        "tamanhoBytes": { "bsonType": "long" },
+        "sha256": { "bsonType": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "stAtivo": { "bsonType": "bool" },
+    "criadoEm": { "bsonType": "date" },
+    "atualizadoEm": { "bsonType": "date" },
+    "removidoEm": { "bsonType": ["date", "null"] }
+  }
+}

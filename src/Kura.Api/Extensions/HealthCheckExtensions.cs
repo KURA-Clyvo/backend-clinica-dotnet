@@ -49,7 +49,10 @@ public static class HealthCheckExtensions
             // Degraded aqui é defesa em profundidade (o check já nunca lança e já
             // nunca devolve Unhealthy por conta própria; isto cobre qualquer
             // exceção que escape do try/catch interno).
-            .AddCheck<LunaHealthCheck>("luna", failureStatus: HealthStatus.Degraded, tags: ["luna"]);
+            .AddCheck<LunaHealthCheck>("luna", failureStatus: HealthStatus.Degraded, tags: ["luna"])
+            // S4-NET-02: MongoDB (laudos) e dependência opcional da API: fora do ar ou não
+            // configurado = Degraded (200), nunca Unhealthy.
+            .AddCheck<MongoHealthCheck>("mongo", failureStatus: HealthStatus.Degraded, tags: ["mongo"]);
 
         return services;
     }

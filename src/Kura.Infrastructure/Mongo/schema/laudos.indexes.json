@@ -1,0 +1,5 @@
+[
+  { "name": "ix_laudo_clinica_pet_ativo_data", "keys": { "idClinica": 1, "idPet": 1, "stAtivo": 1, "dataExame": -1, "_id": -1 } },
+  { "name": "ix_laudo_clinica_pet_ativo_tipo_data", "keys": { "idClinica": 1, "idPet": 1, "stAtivo": 1, "tipo": 1, "dataExame": -1, "_id": -1 } },
+  { "name": "ix_laudo_pet_ativo_data", "keys": { "idPet": 1, "stAtivo": 1, "dataExame": -1 } }
+]
