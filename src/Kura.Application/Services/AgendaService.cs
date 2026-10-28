@@ -5,6 +5,7 @@ using Kura.Application.Services.Interfaces;
 using Kura.CrossCutting.Observability;
 using Kura.Domain.Exceptions;
 using Kura.Domain.Interfaces;
+using Kura.Domain.Paginacao;
 using Kura.Domain.Storage;
 using Microsoft.Extensions.Logging;
 
@@ -184,11 +185,7 @@ public sealed class AgendaService : IAgendaService
         activity?.SetTag("kura.layer", "Application");
         activity?.SetTag("kura.intervalo_dias", (dataFim - dataInicio).TotalDays);
 
-        if (dataFim < dataInicio)
-            throw new RegraDeNegocioException("DataFim não pode ser anterior à DataInicio.");
-
-        if ((dataFim - dataInicio).TotalDays > 31)
-            throw new RegraDeNegocioException("Intervalo máximo de 31 dias.");
+        ValidarIntervalo(dataInicio, dataFim);
 
         var agendamentos = await _readRepository.GetByIntervaloAsync(
             _clinicaContext.IdClinica, dataInicio, dataFim, idVeterinario);
@@ -202,6 +199,54 @@ public sealed class AgendaService : IAgendaService
             Agendamentos = itens
         };
     }
+
+    /// <summary>Regra de intervalo compartilhada pela v1 e pela v2 (mensagens idênticas).</summary>
+    private static void ValidarIntervalo(DateTime dataInicio, DateTime dataFim)
+    {
+        if (dataFim < dataInicio)
+            throw new RegraDeNegocioException("DataFim não pode ser anterior à DataInicio.");
+
+        if ((dataFim - dataInicio).TotalDays > 31)
+            throw new RegraDeNegocioException("Intervalo máximo de 31 dias.");
+    }
+
+    public async Task<PaginaDe<AgendamentoItemDto>> ListarPaginadoAsync(ConsultaAgendamentos consulta)
+    {
+        using var activity = KuraActivitySource.Instancia.StartActivity("Application.AgendaService.ListarPaginadoAsync");
+        activity?.SetTag("kura.layer", "Application");
+
+        ValidarIntervalo(consulta.DataInicio, consulta.DataFim);
+
+        var pagina = await _readRepository.ListarPaginadoAsync(_clinicaContext.IdClinica, consulta);
+        return pagina.Mapear(ToItemDto);
+    }
+
+    /// <summary>
+    /// S4-NET-04 — status conhecidos pela máquina de estados (chaves de <see cref="TransicoesPermitidas"/>).
+    /// Usado para validar o filtro <c>status</c> da v2 sem uma segunda lista.
+    /// </summary>
+    public static IReadOnlyCollection<string> StatusConhecidos { get; } = TransicoesPermitidas.Keys.ToArray();
+
+    /// <summary>
+    /// S4-NET-04 — o status admite alguma transição de <c>ST_STATUS</c> (não é terminal)? Decide se
+    /// a v2 oferece a ação <c>status</c>. Lê o MESMO mapa que <see cref="AtualizarStatusAsync"/>.
+    /// </summary>
+    public static bool AdmiteTransicaoDeStatus(string? stStatus) =>
+        stStatus is not null && TransicoesPermitidas.TryGetValue(stStatus, out var destinos) && destinos.Length > 0;
+
+    /// <summary>
+    /// S4-NET-04 — check-in é aceito? Mesma regra de <see cref="CheckinAsync"/> exceto a guarda de
+    /// DIA (relógio) e de versão, que só podem ser avaliadas na chamada: status elegível, ainda sem
+    /// check-in (idempotente) e sem início de atendimento.
+    /// </summary>
+    public static bool AdmiteCheckin(string? stStatus, DateTime? dtCheckin, DateTime? dtInicioAtendimento) =>
+        stStatus is not null && StatusElegiveisParaEventoRecepcao.Contains(stStatus)
+        && !dtCheckin.HasValue && !dtInicioAtendimento.HasValue;
+
+    /// <summary>S4-NET-04 — início de atendimento é aceito? Status elegível e ainda sem início.</summary>
+    public static bool AdmiteInicioAtendimento(string? stStatus, DateTime? dtInicioAtendimento) =>
+        stStatus is not null && StatusElegiveisParaEventoRecepcao.Contains(stStatus)
+        && !dtInicioAtendimento.HasValue;
 
     public async Task<AgendamentoItemDto> AtualizarStatusAsync(long id, AtualizarStatusAgendamentoDto dto)
     {

@@ -47,7 +47,7 @@ public class AgendaController(IAgendaService agendaService) : ControllerBase
     /// <response code="404">Agendamento não encontrado.</response>
     /// <response code="409">Conflito de concorrência — outro processo atualizou o agendamento. Atualize e tente novamente.</response>
     /// <response code="422">Agendamento já está em estado final (REALIZADO, CANCELADO ou NAO_COMPARECEU) ou a transição de status pedida não é permitida a partir do status atual — ver a máquina de estados em <c>AgendaService.TransicoesPermitidas</c>.</response>
-    [HttpPatch("~/api/v1/agendamentos/{id:long}/status")]
+    [HttpPatch("~/api/v1/agendamentos/{id:long}/status", Name = "AtualizarStatusAgendamento")]
     [ProducesResponseType(typeof(AgendamentoItemDto), 200)]
     [ProducesResponseType(typeof(ProblemDetails), 400)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
@@ -94,7 +94,7 @@ public class AgendaController(IAgendaService agendaService) : ControllerBase
     /// <response code="404">Agendamento não encontrado (ou de outra clínica — mesma resposta).</response>
     /// <response code="409">Conflito de concorrência — <c>NrVersion</c> desatualizado.</response>
     /// <response code="422">Status atual não permite check-in.</response>
-    [HttpPost("~/api/v1/agendamentos/{id:long}/checkin")]
+    [HttpPost("~/api/v1/agendamentos/{id:long}/checkin", Name = "CheckinAgendamento")]
     [ProducesResponseType(typeof(AgendamentoItemDto), 200)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
     [ProducesResponseType(typeof(ProblemDetails), 409)]
@@ -117,7 +117,7 @@ public class AgendaController(IAgendaService agendaService) : ControllerBase
     /// <response code="404">Agendamento não encontrado (ou de outra clínica — mesma resposta).</response>
     /// <response code="409">Conflito de concorrência — <c>NrVersion</c> desatualizado.</response>
     /// <response code="422">Status atual não permite iniciar atendimento.</response>
-    [HttpPost("~/api/v1/agendamentos/{id:long}/inicio-atendimento")]
+    [HttpPost("~/api/v1/agendamentos/{id:long}/inicio-atendimento", Name = "InicioAtendimentoAgendamento")]
     [ProducesResponseType(typeof(AgendamentoItemDto), 200)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
     [ProducesResponseType(typeof(ProblemDetails), 409)]

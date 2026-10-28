@@ -1,6 +1,7 @@
 namespace Kura.Domain.Interfaces;
 
 using Kura.Domain.Entities;
+using Kura.Domain.Paginacao;
 
 public interface ITutorRepository : IRepository<Tutor>
 {
@@ -51,4 +52,10 @@ public interface ITutorRepository : IRepository<Tutor>
     /// colidentes no valor exato + um terceiro, distinto, sob o valor com prefixo).</para>
     /// </summary>
     Task<int> ContarAtivosPorTelefoneAsync(string numero);
+
+    /// <summary>
+    /// S4-NET-04 — lista paginada da v2, com a MESMA semântica de busca de <see cref="SearchAsync"/>
+    /// (nome contém, sem caixa, ou CPF parcial). Paginação/ordenação no banco; total no mesmo predicado.
+    /// </summary>
+    Task<PaginaDe<Tutor>> ListarPaginadoAsync(ConsultaTutores consulta, long idClinica);
 }

@@ -3,6 +3,7 @@ namespace Kura.Infrastructure.Persistence.Repositories;
 using Kura.CrossCutting.Observability;
 using Kura.Domain.Entities;
 using Kura.Domain.Interfaces;
+using Kura.Domain.Paginacao;
 using Microsoft.EntityFrameworkCore;
 
 public class AgendaReadRepository(KuraDbContext context) : IAgendamentoReadRepository
@@ -42,5 +43,49 @@ public class AgendaReadRepository(KuraDbContext context) : IAgendamentoReadRepos
             query = query.Where(a => a.IdVeterinario == idVeterinario.Value);
 
         return await query.OrderBy(a => a.DtAgendamento).ToListAsync();
+    }
+
+    public async Task<PaginaDe<Agendamento>> ListarPaginadoAsync(long idClinica, ConsultaAgendamentos consulta)
+    {
+        using var activity = KuraActivitySource.Instancia.StartActivity("Infrastructure.AgendaReadRepository.ListarPaginadoAsync");
+        activity?.SetTag("kura.layer", "Infrastructure");
+        activity?.SetTag("kura.id_clinica", idClinica);
+
+        // Agendamento NÃO tem query filter: o IdClinica abaixo é a ÚNICA barreira de tenant.
+        // Mesma regra de intervalo do GetByIntervaloAsync (fim exclusivo no dia seguinte).
+        var inicio = consulta.DataInicio.Date;
+        var fimExclusivo = consulta.DataFim.Date.AddDays(1);
+        var filtrado = context.Agendamentos
+            .Where(a => a.IdClinica == idClinica
+                     && a.DtAgendamento >= inicio
+                     && a.DtAgendamento < fimExclusivo);
+
+        if (consulta.IdVeterinario.HasValue)
+            filtrado = filtrado.Where(a => a.IdVeterinario == consulta.IdVeterinario.Value);
+        if (!string.IsNullOrWhiteSpace(consulta.Status))
+        {
+            var status = consulta.Status;
+            filtrado = filtrado.Where(a => a.StStatus == status);
+        }
+
+        var total = await filtrado.LongCountAsync();
+
+        var ordenado = consulta.Ordem switch
+        {
+            OrdenacaoAgendamento.DtAgendamentoDesc => filtrado.OrderByDescending(a => a.DtAgendamento).ThenBy(a => a.Id),
+            OrdenacaoAgendamento.IdAsc => filtrado.OrderBy(a => a.Id),
+            OrdenacaoAgendamento.IdDesc => filtrado.OrderByDescending(a => a.Id),
+            _ => filtrado.OrderBy(a => a.DtAgendamento).ThenBy(a => a.Id),
+        };
+
+        var itens = await ordenado
+            .Skip((consulta.Pagina - 1) * consulta.TamanhoPagina)
+            .Take(consulta.TamanhoPagina)
+            .Include(a => a.Pet)
+            .Include(a => a.Tutor)
+            .Include(a => a.Veterinario)
+            .Include(a => a.TriagemOrigem)
+            .ToListAsync();
+        return new PaginaDe<Agendamento>(itens, consulta.Pagina, consulta.TamanhoPagina, total);
     }
 }

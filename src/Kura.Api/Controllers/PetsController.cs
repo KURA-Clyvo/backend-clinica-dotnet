@@ -105,7 +105,7 @@ public class PetsController : ControllerBase
     /// <response code="200">Pet atualizado.</response>
     /// <response code="400">Dados inválidos.</response>
     /// <response code="404">Pet não encontrado.</response>
-    [HttpPut("{id:long}")]
+    [HttpPut("{id:long}", Name = "AtualizarPet")]
     [ProducesResponseType(typeof(PetResponseDto), 200)]
     [ProducesResponseType(typeof(ProblemDetails), 400)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
@@ -122,7 +122,7 @@ public class PetsController : ControllerBase
     /// <returns>Sem conteúdo.</returns>
     /// <response code="204">Pet inativado.</response>
     /// <response code="404">Pet não encontrado.</response>
-    [HttpDelete("{id:long}")]
+    [HttpDelete("{id:long}", Name = "InativarPet")]
     [ProducesResponseType(204)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
     public async Task<IActionResult> Delete(long id)
@@ -140,7 +140,7 @@ public class PetsController : ControllerBase
     /// <response code="204">Tutor vinculado com sucesso.</response>
     /// <response code="400">Dados inválidos ou vínculo duplicado.</response>
     /// <response code="404">Pet ou tutor não encontrado.</response>
-    [HttpPost("{id:long}/tutores")]
+    [HttpPost("{id:long}/tutores", Name = "AdicionarTutorAoPet")]
     [ProducesResponseType(204)]
     [ProducesResponseType(typeof(ProblemDetails), 400)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
@@ -157,7 +157,7 @@ public class PetsController : ControllerBase
     /// <returns>Lista ordenada de eventos clínicos.</returns>
     /// <response code="200">Timeline retornada com sucesso.</response>
     /// <response code="404">Pet não encontrado.</response>
-    [HttpGet("{id:long}/timeline")]
+    [HttpGet("{id:long}/timeline", Name = "TimelineDoPet")]
     [ProducesResponseType(typeof(IEnumerable<TimelineItemDto>), 200)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
     public async Task<IActionResult> GetTimeline(long id)
@@ -173,7 +173,7 @@ public class PetsController : ControllerBase
     /// <returns>Lista de vacinas com próximas doses pendentes.</returns>
     /// <response code="200">Vacinas retornadas.</response>
     /// <response code="404">Pet não encontrado.</response>
-    [HttpGet("{id:long}/proximas-vacinas")]
+    [HttpGet("{id:long}/proximas-vacinas", Name = "ProximasVacinasDoPet")]
     [ProducesResponseType(typeof(IEnumerable<VacinaResponseDto>), 200)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
     public async Task<IActionResult> GetProximasVacinas(long id)

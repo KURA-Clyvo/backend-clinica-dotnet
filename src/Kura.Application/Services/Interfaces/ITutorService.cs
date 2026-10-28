@@ -1,5 +1,6 @@
 namespace Kura.Application.Services.Interfaces;
 
+using Kura.Domain.Paginacao;
 using Kura.Application.DTOs.Luna;
 using Kura.Application.DTOs.Pet;
 using Kura.Application.DTOs.Tutor;
@@ -35,4 +36,7 @@ public interface ITutorService
     /// Luna e a interação é gravada com clínica/tutor nulos.
     /// </summary>
     Task<TutorContextoLunaDto?> BuscarContextoPorTelefoneAsync(string numero);
+
+    /// <summary>S4-NET-04 — lista paginada da v2 (a v1 <see cref="SearchAsync"/> não muda).</summary>
+    Task<PaginaDe<TutorResponseDto>> ListarPaginadoAsync(ConsultaTutores consulta);
 }

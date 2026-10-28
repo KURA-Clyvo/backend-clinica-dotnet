@@ -2,6 +2,7 @@ namespace Kura.Infrastructure.Persistence.Repositories;
 
 using Kura.Domain.Entities;
 using Kura.Domain.Interfaces;
+using Kura.Domain.Paginacao;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -111,4 +112,33 @@ public class TutorRepository : Repository<Tutor>, ITutorRepository
     /// </summary>
     public Task<int> ContarAtivosPorTelefoneAsync(string numero) =>
         _dbSet.Where(t => t.NrTelefone == numero).Take(2).CountAsync();
+
+    public async Task<PaginaDe<Tutor>> ListarPaginadoAsync(ConsultaTutores consulta, long idClinica)
+    {
+        var filtrado = _dbSet.Where(t => t.IdClinica == idClinica);
+
+        if (!string.IsNullOrWhiteSpace(consulta.Busca))
+        {
+            // Mesma semântica do SearchAsync da v1 (nome sem caixa OU CPF parcial).
+            var busca = consulta.Busca;
+            var lower = busca.ToLower();
+            filtrado = filtrado.Where(t => t.NmTutor.ToLower().Contains(lower) || t.NrCpf.Contains(busca));
+        }
+
+        var total = await filtrado.LongCountAsync();
+
+        var ordenado = consulta.Ordem switch
+        {
+            OrdenacaoTutor.NomeDesc => filtrado.OrderByDescending(t => t.NmTutor).ThenBy(t => t.Id),
+            OrdenacaoTutor.IdAsc => filtrado.OrderBy(t => t.Id),
+            OrdenacaoTutor.IdDesc => filtrado.OrderByDescending(t => t.Id),
+            _ => filtrado.OrderBy(t => t.NmTutor).ThenBy(t => t.Id),
+        };
+
+        var itens = await ordenado
+            .Skip((consulta.Pagina - 1) * consulta.TamanhoPagina)
+            .Take(consulta.TamanhoPagina)
+            .ToListAsync();
+        return new PaginaDe<Tutor>(itens, consulta.Pagina, consulta.TamanhoPagina, total);
+    }
 }

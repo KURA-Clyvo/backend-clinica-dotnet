@@ -1,6 +1,7 @@
 namespace Kura.Domain.Interfaces;
 
 using Kura.Domain.Entities;
+using Kura.Domain.Paginacao;
 
 public interface IPetRepository : IRepository<Pet>
 {
@@ -18,4 +19,12 @@ public interface IPetRepository : IRepository<Pet>
     /// clínica -- mesma resposta, sem oráculo (REC-10, aceite).
     /// </summary>
     Task<Pet?> GetByIdComVinculosAsync(long id, long idClinica);
+
+    /// <summary>
+    /// S4-NET-04 — lista paginada da v2. Paginação, ordenação e filtro rodam NO BANCO
+    /// (<c>CountAsync</c> + <c>OrderBy…ThenBy(Id)</c> + <c>Skip/Take</c>); o total usa o mesmo
+    /// predicado da página. Escopo: <c>IdClinica</c> explícito somado ao query filter (nunca
+    /// <c>IgnoreQueryFilters</c>). A v1 (<see cref="GetByFiltersAsync"/>) não muda.
+    /// </summary>
+    Task<PaginaDe<Pet>> ListarPaginadoAsync(ConsultaPets consulta, long idClinica);
 }
