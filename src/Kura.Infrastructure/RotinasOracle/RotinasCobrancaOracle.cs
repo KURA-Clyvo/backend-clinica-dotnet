@@ -31,8 +31,8 @@ using Oracle.ManagedDataAccess.Types;
 /// </summary>
 public class RotinasCobrancaOracle : IRotinasCobrancaOracle
 {
-    private const string ProcListar = "PKG_COBRANCA.LISTAR_JSON";
-    private const string ProcRelatorio = "PKG_COBRANCA.RELATORIO_JSON";
+    internal const string ProcListar = "PKG_COBRANCA.LISTAR_JSON";
+    internal const string ProcRelatorio = "PKG_COBRANCA.RELATORIO_JSON";
 
     private readonly KuraDbContext _db;
 
@@ -44,7 +44,24 @@ public class RotinasCobrancaOracle : IRotinasCobrancaOracle
     public Task<string> RelatorioJsonAsync(long idClinica, CancellationToken ct = default) =>
         ExecutarAsync(ProcRelatorio, idClinica, ct);
 
-    private async Task<string> ExecutarAsync(string procedure, long idClinica, CancellationToken ct)
+    /// <summary>
+    /// Monta o comando (tipo, nome da rotina e os 2 parâmetros, na ordem do contrato) <b>sem
+    /// conexão</b>, para o teste unitário fixar a montagem sem Oracle. <c>internal</c> por isso.
+    /// </summary>
+    internal static OracleCommand MontarComando(string procedure, long idClinica)
+    {
+        var cmd = new OracleCommand
+        {
+            CommandType = CommandType.StoredProcedure,
+            CommandText = procedure,
+        };
+        cmd.Parameters.Add(new OracleParameter("p_id_clinica", OracleDbType.Int64, idClinica, ParameterDirection.Input));
+        cmd.Parameters.Add(new OracleParameter("p_saida", OracleDbType.Clob, ParameterDirection.Output));
+        return cmd;
+    }
+
+    /// <remarks><c>internal virtual</c> só para o teste observar qual rotina cada método público pede.</remarks>
+    internal virtual async Task<string> ExecutarAsync(string procedure, long idClinica, CancellationToken ct)
     {
         try
         {
@@ -55,18 +72,15 @@ public class RotinasCobrancaOracle : IRotinasCobrancaOracle
 
             try
             {
-                using var cmd = conexao.CreateCommand();
-                cmd.CommandType = CommandType.StoredProcedure;
-                cmd.CommandText = procedure;
+                using var cmd = MontarComando(procedure, idClinica);
+                cmd.Connection = conexao;
 
                 // Participa da transação corrente do EF, se houver (a rotina não commita).
                 var transacao = _db.Database.CurrentTransaction;
                 if (transacao is not null)
                     cmd.Transaction = (OracleTransaction)transacao.GetDbTransaction();
 
-                cmd.Parameters.Add(new OracleParameter("p_id_clinica", OracleDbType.Int64, idClinica, ParameterDirection.Input));
-                var saida = new OracleParameter("p_saida", OracleDbType.Clob, ParameterDirection.Output);
-                cmd.Parameters.Add(saida);
+                var saida = cmd.Parameters["p_saida"];
 
                 await cmd.ExecuteNonQueryAsync(ct);
 
