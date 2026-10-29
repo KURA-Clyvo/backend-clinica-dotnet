@@ -89,7 +89,7 @@
         "tags": [
           "Agenda"
         ],
-        "summary": "Atualiza o status de um agendamento com controle de concorrência otimista.\r\nO cliente deve enviar o NrVersion obtido na última leitura para evitar sobrescrita silenciosa.",
+        "summary": "Atualiza o status de um agendamento com controle de concorrência otimista.\nO cliente deve enviar o NrVersion obtido na última leitura para evitar sobrescrita silenciosa.",
         "operationId": "AtualizarStatusAgendamento",
         "parameters": [
           {
@@ -232,9 +232,9 @@
         "tags": [
           "Agenda"
         ],
-        "summary": "REC-10 — cria um agendamento pela recepção da clínica (ou pelo card de uma triagem\r\nda Luna, F-3). `IdClinica` vem SEMPRE do JWT, nunca do corpo.",
+        "summary": "REC-10 — cria um agendamento pela recepção da clínica (ou pelo card de uma triagem\nda Luna, F-3). `IdClinica` vem SEMPRE do JWT, nunca do corpo.",
         "requestBody": {
-          "description": "Dados do agendamento (tutor, pet, veterinário, data/hora local de\r\n            SP, tipo, duração opcional, observações opcionais, triagem de origem opcional).",
+          "description": "Dados do agendamento (tutor, pet, veterinário, data/hora local de\n            SP, tipo, duração opcional, observações opcionais, triagem de origem opcional).",
           "content": {
             "application/json": {
               "schema": {
@@ -342,7 +342,7 @@
         "tags": [
           "Agenda"
         ],
-        "summary": "REC-11 — registra a chegada do paciente (check-in). Só a partir de `AGENDADO` ou\r\n`CONFIRMADO`. Idempotente: uma 2ª chamada devolve o estado atual sem sobrescrever o\r\nhorário nem incrementar `NrVersion`. Horário sempre do relógio da clínica (hora local\r\nde SP), nunca do cliente.",
+        "summary": "REC-11 — registra a chegada do paciente (check-in). Só a partir de `AGENDADO` ou\n`CONFIRMADO`. Idempotente: uma 2ª chamada devolve o estado atual sem sobrescrever o\nhorário nem incrementar `NrVersion`. Horário sempre do relógio da clínica (hora local\nde SP), nunca do cliente.",
         "operationId": "CheckinAgendamento",
         "parameters": [
           {
@@ -465,7 +465,7 @@
         "tags": [
           "Agenda"
         ],
-        "summary": "REC-11 — registra o início do atendimento. Permitido sem check-in prévio (walk-in que\r\nentra direto) — nunca preenche `DtCheckin` como efeito colateral. Mesmo contrato de\r\nlock/idempotência do check-in.",
+        "summary": "REC-11 — registra o início do atendimento. Permitido sem check-in prévio (walk-in que\nentra direto) — nunca preenche `DtCheckin` como efeito colateral. Mesmo contrato de\nlock/idempotência do check-in.",
         "operationId": "InicioAtendimentoAgendamento",
         "parameters": [
           {
@@ -589,7 +589,7 @@
           "AgendamentosV2"
         ],
         "summary": "Lista os agendamentos de um intervalo (paginado, ordenado, filtrado).",
-        "description": "Exemplo: `GET /api/v2/agendamentos?dataInicio=2026-10-26&dataFim=2026-11-01&status=AGENDADO&sort=-dtAgendamento`.\r\nEm cada item, `_links` traz `pet` e, conforme o estado, `checkin`, `inicio-atendimento` e\r\n`status` (rotas v1 de ação). Não há rota v1 de detalhe de agendamento, então o item não tem `self`.",
+        "description": "Exemplo: `GET /api/v2/agendamentos?dataInicio=2026-10-26&dataFim=2026-11-01&status=AGENDADO&sort=-dtAgendamento`.\nEm cada item, `_links` traz `pet` e, conforme o estado, `checkin`, `inicio-atendimento` e\n`status` (rotas v1 de ação). Não há rota v1 de detalhe de agendamento, então o item não tem `self`.",
         "operationId": "ListarAgendamentosV2",
         "parameters": [
           {
@@ -1072,7 +1072,7 @@
         "tags": [
           "Cobrancas"
         ],
-        "summary": "Lança uma cobrança no atendimento. <b>Escrita: `[Authorize]` — o veterinário\r\nlança no fechamento do atendimento</b> (ver o cabeçalho da classe).\r\n            \r\n\r\nO corpo mínimo é `{\"idServicoPreco\": N}`: o valor é <b>copiado</b> do preço\r\nde tabela daquele instante, sem digitação. `vlCobrado` avulso (ou por cima do\r\nserviço, como desconto) também é lançamento legítimo (D-2).",
+        "summary": "Lança uma cobrança no atendimento. <b>Escrita: `[Authorize]` — o veterinário\nlança no fechamento do atendimento</b> (ver o cabeçalho da classe).\n            \n\nO corpo mínimo é `{\"idServicoPreco\": N}`: o valor é <b>copiado</b> do preço\nde tabela daquele instante, sem digitação. `vlCobrado` avulso (ou por cima do\nserviço, como desconto) também é lançamento legítimo (D-2).",
         "parameters": [
           {
             "name": "idEventoClinico",
@@ -1300,7 +1300,7 @@
         "tags": [
           "Cobrancas"
         ],
-        "summary": "Uma cobrança pelo id. <b>Leitura: `SomenteGestor` (D-7).</b>\r\n⚠️ O `VlCobrado` devolvido é a <b>cópia</b> gravada no lançamento, nunca o\r\npreço atual do serviço de origem — remarcar a tabela de preços não reescreve o\r\nhistórico financeiro.",
+        "summary": "Uma cobrança pelo id. <b>Leitura: `SomenteGestor` (D-7).</b>\n⚠️ O `VlCobrado` devolvido é a <b>cópia</b> gravada no lançamento, nunca o\npreço atual do serviço de origem — remarcar a tabela de preços não reescreve o\nhistórico financeiro.",
         "parameters": [
           {
             "name": "idEventoClinico",
@@ -1936,7 +1936,7 @@
         "tags": [
           "EventosClinicos"
         ],
-        "summary": "Envia o áudio da consulta para transcrição (Whisper via Luna) e gera um draft SOAP.\r\nO resultado é salvo como rascunho não confirmado (ST_SOAP_CONFIRMADO='N') — o vet\r\nsempre revisa e confirma explicitamente via M:Kura.Api.Controllers.EventosClinicosController.ConfirmarSoap(System.Int64,Kura.Application.DTOs.Transcricao.SoapConfirmarDto) antes de finalizar.\r\nSe a Luna estiver indisponível, transcrição/SOAP retornam nulos para edição manual.",
+        "summary": "Envia o áudio da consulta para transcrição (Whisper via Luna) e gera um draft SOAP.\nO resultado é salvo como rascunho não confirmado (ST_SOAP_CONFIRMADO='N') — o vet\nsempre revisa e confirma explicitamente via M:Kura.Api.Controllers.EventosClinicosController.ConfirmarSoap(System.Int64,Kura.Application.DTOs.Transcricao.SoapConfirmarDto) antes de finalizar.\nSe a Luna estiver indisponível, transcrição/SOAP retornam nulos para edição manual.",
         "parameters": [
           {
             "name": "id",
@@ -2019,7 +2019,7 @@
         "tags": [
           "EventosClinicos"
         ],
-        "summary": "Confirmação explícita do vet do texto SOAP (revisado/editado). Só então\r\nST_SOAP_CONFIRMADO vira 'S' — nunca acontece automaticamente.",
+        "summary": "Confirmação explícita do vet do texto SOAP (revisado/editado). Só então\nST_SOAP_CONFIRMADO vira 'S' — nunca acontece automaticamente.",
         "parameters": [
           {
             "name": "id",
@@ -2101,7 +2101,7 @@
         "tags": [
           "EventosClinicos"
         ],
-        "summary": "Gera o PDF do receituário da prescrição (CRMV, pet, medicamento/posologia/duração\r\ne data), salva o arquivo em storage e persiste um Documento (path, nunca BLOB).",
+        "summary": "Gera o PDF do receituário da prescrição (CRMV, pet, medicamento/posologia/duração\ne data), salva o arquivo em storage e persiste um Documento (path, nunca BLOB).",
         "parameters": [
           {
             "name": "id",
@@ -2163,7 +2163,7 @@
         "tags": [
           "EventosClinicos"
         ],
-        "summary": "Devolve os bytes do PDF de um receituário já gerado (TASK-51). O caminho físico\r\nnunca vem do cliente — é resolvido a partir do `Documento` no banco, com o\r\nisolamento de tenant garantido por carregar o evento clínico pai primeiro (que já\r\nestá em `KuraDbContext.ApplyTenantFilters`). Receituário de outra clínica ou\r\ndocumento inexistente/fora do storage configurado devolvem 404 — nunca os bytes.",
+        "summary": "Devolve os bytes do PDF de um receituário já gerado (TASK-51). O caminho físico\nnunca vem do cliente — é resolvido a partir do `Documento` no banco, com o\nisolamento de tenant garantido por carregar o evento clínico pai primeiro (que já\nestá em `KuraDbContext.ApplyTenantFilters`). Receituário de outra clínica ou\ndocumento inexistente/fora do storage configurado devolvem 404 — nunca os bytes.",
         "parameters": [
           {
             "name": "id",
@@ -2238,7 +2238,7 @@
         "tags": [
           "Financeiro"
         ],
-        "summary": "Exportação das cobranças ativas da clínica do token em JSON, <b>montada pelo package\r\nOracle</b>`PKG_COBRANCA.LISTAR_JSON` (S4-DB-06). Devolve um array (`[]` se a\r\nclínica não tem cobrança). O escopo é sempre a clínica do token: não há parâmetro de\r\nclínica. `404` se a clínica do token não existe ou está inativa; `503` se a\r\nrotina Oracle está indisponível.",
+        "summary": "Exportação das cobranças ativas da clínica do token em JSON, <b>montada pelo package\nOracle</b>`PKG_COBRANCA.LISTAR_JSON` (S4-DB-06). Devolve um array (`[]` se a\nclínica não tem cobrança). O escopo é sempre a clínica do token: não há parâmetro de\nclínica. `404` se a clínica do token não existe ou está inativa; `503` se a\nrotina Oracle está indisponível.",
         "responses": {
           "200": {
             "description": "OK",
@@ -2322,7 +2322,7 @@
         "tags": [
           "Financeiro"
         ],
-        "summary": "Relatório de cobranças por forma de pagamento da clínica do token, <b>montado pelo\r\npackage Oracle</b>`PKG_COBRANCA.RELATORIO_JSON` (S4-DB-06): objeto com\r\n`grupos` (forma e total) e `subTotal`. O escopo é sempre a clínica do token.\r\n`404` se a clínica do token não existe ou está inativa; `503` se a rotina\r\nOracle está indisponível.",
+        "summary": "Relatório de cobranças por forma de pagamento da clínica do token, <b>montado pelo\npackage Oracle</b>`PKG_COBRANCA.RELATORIO_JSON` (S4-DB-06): objeto com\n`grupos` (forma e total) e `subTotal`. O escopo é sempre a clínica do token.\n`404` se a clínica do token não existe ou está inativa; `503` se a rotina\nOracle está indisponível.",
         "responses": {
           "200": {
             "description": "OK",
@@ -2406,7 +2406,7 @@
         "tags": [
           "Financeiro"
         ],
-        "summary": "Resumo financeiro da clínica do token no período: <b>receita bruta</b>, <b>ticket\r\nmédio</b>, <b>mix por serviço</b> e <b>comparação com o período anterior</b>.\r\n            \r\n\r\n\uD83D\uDD34 <b>`de` e `ate` são OBRIGATÓRIOS e INCLUSIVOS</b>, no formato\r\n`YYYY-MM-DD` (data, sem hora). Não há default de servidor: um cliente que\r\nesquecesse o período receberia `200` com números plausíveis de <b>outro</b>\r\nperíodo, que é o defeito que este ciclo persegue. `de == ate` é válido (relatório\r\nde um dia).\r\n\uD83D\uDD34 <b>A borda superior conta INTEIRA.</b> O servidor converte as duas datas para o\r\nintervalo semiaberto `[de 00:00, ate+1d 00:00)`, então uma cobrança das\r\n`23:59` do dia `ate`<b>entra</b> no relatório. A resposta devolve o\r\nintervalo que de fato usou (`periodo.inicioUtc` / `periodo.fimExclusivoUtc`)\r\npara que o app confira em vez de acreditar.\r\n\uD83D\uDD34 <b>FUSO: UTC, sem conversão — limitação DECLARADA, não esquecida.</b>`DT_COBRANCA` é gravada em UTC (FD-10) e o filtro compara em UTC. Consequência\r\npara uma clínica em `America/Sao_Paulo`: o \"dia\" deste relatório é o dia\r\n<b>UTC</b> — as 3 primeiras horas de cada dia local caem no dia anterior do relatório.\r\nA convenção de fuso de exibição do projeto é item em aberto e deliberadamente <b>não\r\nnasce aqui</b>.\r\n\uD83D\uDD34 <b>A agregação é por `DT_COBRANCA` — a data do FATO, nunca a data de criação da\r\nlinha.</b> As duas divergem no caso real que a FD-10 aceita: o fechamento do dia\r\nanterior lançado na manhã seguinte. ⚠️ <b>Limite herdado e declarado</b> (revisão G2 da\r\nFD-10): o validator de lançamento aceita `dtCobranca` até <b>+1 dia no futuro</b>,\r\npara absorver fuso de cliente — então uma cobrança lançada em <b>31/01</b> no limite da\r\ntolerância cai no balde de <b>fevereiro</b>. É comportamento declarado, não bug: a\r\ntolerância existe para não recusar o \"agora\" de um cliente que serializa sem offset.\r\n\uD83D\uDD34 <b>Duas divisões, e as duas devolvem `null` em vez de `0`:</b>`ticketMedio` é `null` quando não houve atendimento cobrado, e\r\n`variacaoPercentual` é `null` quando a receita do período anterior é zero\r\n(crescer do zero não tem porcentagem). Os números crus\r\n(`receitaBrutaPeriodoAnterior`, `nrAtendimentosCobrados`) vão na resposta de\r\nqualquer jeito, para o app dizer algo honesto com a porcentagem nula. <b>Zero para\r\n\"não medimos\" seria mentira.</b>\r\n<b>Arredondamento declarado:</b>`receitaBruta` e as receitas do mix são\r\n<b>somas exatas</b>, não arredondadas (cada parcela já é `NUMBER(10,2)`);\r\n`ticketMedio` e `variacaoPercentual` saem com <b>2 casas</b>,\r\n`MidpointRounding.AwayFromZero` — e não o `ToEven` padrão do .NET, que\r\nsurpreenderia quem confere na calculadora.\r\n<b>O mix RECONCILIA:</b> a soma das receitas dos baldes é igual à\r\n`receitaBruta`, exata. Lançamento avulso (sem serviço tabelado, D-2) tem balde\r\npróprio com `idServicoPreco: null`, e serviço <b>desativado</b> continua no mix\r\ncom o nome dele — a receita aconteceu, desativar o item do catálogo depois não a\r\ndesfaz.",
+        "summary": "Resumo financeiro da clínica do token no período: <b>receita bruta</b>, <b>ticket\nmédio</b>, <b>mix por serviço</b> e <b>comparação com o período anterior</b>.\n            \n\n\uD83D\uDD34 <b>`de` e `ate` são OBRIGATÓRIOS e INCLUSIVOS</b>, no formato\n`YYYY-MM-DD` (data, sem hora). Não há default de servidor: um cliente que\nesquecesse o período receberia `200` com números plausíveis de <b>outro</b>\nperíodo, que é o defeito que este ciclo persegue. `de == ate` é válido (relatório\nde um dia).\n\uD83D\uDD34 <b>A borda superior conta INTEIRA.</b> O servidor converte as duas datas para o\nintervalo semiaberto `[de 00:00, ate+1d 00:00)`, então uma cobrança das\n`23:59` do dia `ate`<b>entra</b> no relatório. A resposta devolve o\nintervalo que de fato usou (`periodo.inicioUtc` / `periodo.fimExclusivoUtc`)\npara que o app confira em vez de acreditar.\n\uD83D\uDD34 <b>FUSO: UTC, sem conversão — limitação DECLARADA, não esquecida.</b>`DT_COBRANCA` é gravada em UTC (FD-10) e o filtro compara em UTC. Consequência\npara uma clínica em `America/Sao_Paulo`: o \"dia\" deste relatório é o dia\n<b>UTC</b> — as 3 primeiras horas de cada dia local caem no dia anterior do relatório.\nA convenção de fuso de exibição do projeto é item em aberto e deliberadamente <b>não\nnasce aqui</b>.\n\uD83D\uDD34 <b>A agregação é por `DT_COBRANCA` — a data do FATO, nunca a data de criação da\nlinha.</b> As duas divergem no caso real que a FD-10 aceita: o fechamento do dia\nanterior lançado na manhã seguinte. ⚠️ <b>Limite herdado e declarado</b> (revisão G2 da\nFD-10): o validator de lançamento aceita `dtCobranca` até <b>+1 dia no futuro</b>,\npara absorver fuso de cliente — então uma cobrança lançada em <b>31/01</b> no limite da\ntolerância cai no balde de <b>fevereiro</b>. É comportamento declarado, não bug: a\ntolerância existe para não recusar o \"agora\" de um cliente que serializa sem offset.\n\uD83D\uDD34 <b>Duas divisões, e as duas devolvem `null` em vez de `0`:</b>`ticketMedio` é `null` quando não houve atendimento cobrado, e\n`variacaoPercentual` é `null` quando a receita do período anterior é zero\n(crescer do zero não tem porcentagem). Os números crus\n(`receitaBrutaPeriodoAnterior`, `nrAtendimentosCobrados`) vão na resposta de\nqualquer jeito, para o app dizer algo honesto com a porcentagem nula. <b>Zero para\n\"não medimos\" seria mentira.</b>\n<b>Arredondamento declarado:</b>`receitaBruta` e as receitas do mix são\n<b>somas exatas</b>, não arredondadas (cada parcela já é `NUMBER(10,2)`);\n`ticketMedio` e `variacaoPercentual` saem com <b>2 casas</b>,\n`MidpointRounding.AwayFromZero` — e não o `ToEven` padrão do .NET, que\nsurpreenderia quem confere na calculadora.\n<b>O mix RECONCILIA:</b> a soma das receitas dos baldes é igual à\n`receitaBruta`, exata. Lançamento avulso (sem serviço tabelado, D-2) tem balde\npróprio com `idServicoPreco: null`, e serviço <b>desativado</b> continua no mix\ncom o nome dele — a receita aconteceu, desativar o item do catálogo depois não a\ndesfaz.",
         "parameters": [
           {
             "name": "de",
@@ -2514,7 +2514,7 @@
         "tags": [
           "Fotos"
         ],
-        "summary": "Devolve os bytes da foto identificada por chave, se a assinatura\r\n(exp/sig) for válida.",
+        "summary": "Devolve os bytes da foto identificada por chave, se a assinatura\n(exp/sig) for válida.",
         "parameters": [
           {
             "name": "chave",
@@ -2595,7 +2595,7 @@
         "tags": [
           "Iot"
         ],
-        "summary": "Ingere uma leitura de temperatura enviada por um dispositivo IoT.\r\nGera alerta automático se o valor exceder o threshold configurado.",
+        "summary": "Ingere uma leitura de temperatura enviada por um dispositivo IoT.\nGera alerta automático se o valor exceder o threshold configurado.",
         "requestBody": {
           "description": "Leitura de temperatura com ID do dispositivo e timestamp.",
           "content": {
@@ -2905,7 +2905,7 @@
           "Laudos"
         ],
         "summary": "Envia um laudo (PDF, JPEG, PNG ou WebP até 10 MiB) para o pet.",
-        "description": "`multipart/form-data` com as partes: `arquivo` (obrigatória), `tipo`,\r\n             `titulo`, `dataExame` (obrigatórias), `laboratorio`, `observacao`,\r\n             `idEventoClinico`, `dados` (string com um objeto JSON; opcional).\r\n             O formato do arquivo é decidido pelos primeiros bytes, nunca pela extensão ou Content-Type\r\n             do cliente: um arquivo `.pdf` que não é PDF recebe 400.\r\n            \r\n             Exemplo de resposta 201:\r\n             ```\r\n{ \"id\": \"671f...\", \"idPet\": 12, \"tipo\": \"HEMOGRAMA\", \"titulo\": \"Hemograma completo\",\r\n  \"_links\": { \"self\": { \"href\": \"/api/v1/laudos/671f...\" }, \"excluir\": { \"href\": \"/api/v1/laudos/671f...\", \"method\": \"DELETE\" } } }\r\n             \r\n```",
+        "description": "`multipart/form-data` com as partes: `arquivo` (obrigatória), `tipo`,\n             `titulo`, `dataExame` (obrigatórias), `laboratorio`, `observacao`,\n             `idEventoClinico`, `dados` (string com um objeto JSON; opcional).\n             O formato do arquivo é decidido pelos primeiros bytes, nunca pela extensão ou Content-Type\n             do cliente: um arquivo `.pdf` que não é PDF recebe 400.\n            \n             Exemplo de resposta 201:\n             ```\n{ \"id\": \"671f...\", \"idPet\": 12, \"tipo\": \"HEMOGRAMA\", \"titulo\": \"Hemograma completo\",\n  \"_links\": { \"self\": { \"href\": \"/api/v1/laudos/671f...\" }, \"excluir\": { \"href\": \"/api/v1/laudos/671f...\", \"method\": \"DELETE\" } } }\n             \n```",
         "parameters": [
           {
             "name": "idPet",
@@ -3092,7 +3092,7 @@
           "Laudos"
         ],
         "summary": "Lista os laudos do pet (paginado, ordenado, filtrado).",
-        "description": "Exemplo: `GET /api/v1/pets/12/laudos?pageSize=2&sort=-dataExame&tipo=HEMOGRAMA`.\r\nO envelope traz `_links` com `self`, `first`, `last` e, quando existem,\r\n`prev` e `next` — todos preservando filtros e ordenação.",
+        "description": "Exemplo: `GET /api/v1/pets/12/laudos?pageSize=2&sort=-dataExame&tipo=HEMOGRAMA`.\nO envelope traz `_links` com `self`, `first`, `last` e, quando existem,\n`prev` e `next` — todos preservando filtros e ordenação.",
         "operationId": "ListarLaudosDoPet",
         "parameters": [
           {
@@ -3250,7 +3250,7 @@
           "Laudos"
         ],
         "summary": "Detalhe de um laudo.",
-        "description": "`_links`: `self`, `pet`, `laudosDoPet`, `arquivo` e, <b>só para GESTOR</b>,\r\n            `excluir` (`method: DELETE`).",
+        "description": "`_links`: `self`, `pet`, `laudosDoPet`, `arquivo` e, <b>só para GESTOR</b>,\n            `excluir` (`method: DELETE`).",
         "operationId": "ObterLaudo",
         "parameters": [
           {
@@ -3500,7 +3500,7 @@
         "tags": [
           "Luna"
         ],
-        "summary": "Gera relatório agregado de triagens realizadas pela Luna em um intervalo de datas.\r\nInclui total de triagens, distribuição de urgência e taxa de encaminhamento ao veterinário.",
+        "summary": "Gera relatório agregado de triagens realizadas pela Luna em um intervalo de datas.\nInclui total de triagens, distribuição de urgência e taxa de encaminhamento ao veterinário.",
         "parameters": [
           {
             "name": "dataInicio",
@@ -3570,7 +3570,7 @@
         "tags": [
           "Luna"
         ],
-        "summary": "TASK-67: registra uma interação de canal (WhatsApp/e-mail/SMS) recebida ou\r\nenviada pela IA Luna. Deriva ID_CLINICA a partir do tutor quando id_tutor é\r\ninformado. Desde a TASK-77 (FIX_7, decisão de produto): id_tutor ausente\r\n(telefone não cadastrado) NÃO é mais rejeitado — a interação é registrada mesmo\r\nassim, com id_clinica nulo (ver LunaService.RegistrarInteracaoAsync para a\r\ndecisão completa e a consequência aceita sobre visibilidade por clínica).",
+        "summary": "TASK-67: registra uma interação de canal (WhatsApp/e-mail/SMS) recebida ou\nenviada pela IA Luna. Deriva ID_CLINICA a partir do tutor quando id_tutor é\ninformado. Desde a TASK-77 (FIX_7, decisão de produto): id_tutor ausente\n(telefone não cadastrado) NÃO é mais rejeitado — a interação é registrada mesmo\nassim, com id_clinica nulo (ver LunaService.RegistrarInteracaoAsync para a\ndecisão completa e a consequência aceita sobre visibilidade por clínica).",
         "requestBody": {
           "description": "Dados da interação (shape espelha InteractionRequestDTO, Pydantic).",
           "content": {
@@ -3660,7 +3660,7 @@
         "tags": [
           "Luna"
         ],
-        "summary": "TASK-67: registra o resultado de uma triagem de IA, ligada à interação que a\r\noriginou (id_interacao).",
+        "summary": "TASK-67: registra o resultado de uma triagem de IA, ligada à interação que a\noriginou (id_interacao).",
         "requestBody": {
           "description": "Dados da triagem (shape espelha TriageRequestDTO, Pydantic).",
           "content": {
@@ -3770,7 +3770,7 @@
         "tags": [
           "Luna"
         ],
-        "summary": "LU-08: fila de triagens da clínica logada (JWT — idClinica nunca vem de query\r\nstring, ver LunaService.ListarTriagensAsync). Ordenação fixa: ALTA → MEDIA →\r\nBAIXA, depois mais recente. trechoMensagem vem do join com INTERACAO_CANAL,\r\nescopado explicitamente por clínica (não delegado ao query filter global) —\r\ntelefone do tutor NÃO entra na resposta.",
+        "summary": "LU-08: fila de triagens da clínica logada (JWT — idClinica nunca vem de query\nstring, ver LunaService.ListarTriagensAsync). Ordenação fixa: ALTA → MEDIA →\nBAIXA, depois mais recente. trechoMensagem vem do join com INTERACAO_CANAL,\nescopado explicitamente por clínica (não delegado ao query filter global) —\ntelefone do tutor NÃO entra na resposta.",
         "parameters": [
           {
             "name": "urgencia",
@@ -3868,7 +3868,7 @@
         "tags": [
           "Luna"
         ],
-        "summary": "REC-15: agendamentos elegíveis para receber lembrete de confirmação D-1 na data\r\ninformada. SEM escopo de clínica (API key, sem JWT — ver LunaService para a\r\ndecisão completa): devolve candidatos de TODAS as clínicas numa passada só.",
+        "summary": "REC-15: agendamentos elegíveis para receber lembrete de confirmação D-1 na data\ninformada. SEM escopo de clínica (API key, sem JWT — ver LunaService para a\ndecisão completa): devolve candidatos de TODAS as clínicas numa passada só.",
         "parameters": [
           {
             "name": "data",
@@ -3918,7 +3918,7 @@
         "tags": [
           "Luna"
         ],
-        "summary": "REC-15: marca que o lembrete de confirmação D-1 foi enviado para este\r\nagendamento. Idempotente — chamadas repetidas não reescrevem a data já gravada.",
+        "summary": "REC-15: marca que o lembrete de confirmação D-1 foi enviado para este\nagendamento. Idempotente — chamadas repetidas não reescrevem a data já gravada.",
         "parameters": [
           {
             "name": "id",
@@ -3980,7 +3980,7 @@
         "tags": [
           "Luna"
         ],
-        "summary": "REC-15: registra a resposta do tutor ao lembrete de confirmação D-1. A Luna já\r\nresolveu o tutor pelo telefone na entrada; o servidor confere que id_tutor é o\r\ntutor DESTE agendamento (G0 item 11) antes de aplicar a transição (A-10/b).",
+        "summary": "REC-15: registra a resposta do tutor ao lembrete de confirmação D-1. A Luna já\nresolveu o tutor pelo telefone na entrada; o servidor confere que id_tutor é o\ntutor DESTE agendamento (G0 item 11) antes de aplicar a transição (A-10/b).",
         "parameters": [
           {
             "name": "id",
@@ -4435,7 +4435,7 @@
         "tags": [
           "Metrics"
         ],
-        "summary": "TASK-45 — decisão de escopo deste endpoint (ver KURA_BACKLOG_FIX_3.md / CLAUDE.md,\r\nseção \"Multi-tenancy no .NET\"):\r\n            \r\nEste GET raiz continua Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute por exigência de\r\nrubrica FIAP (monitoramento externo sem credencial). Antes ele vazava volume\r\ncross-tenant \"por acidente\", chamando explicitamente o método do EF Core que\r\nignora todos os query filters do `DbContext` (inclusive o de tenant) — e\r\nisso era redundante: o filtro de tenant em\r\n`KuraDbContext.ApplyTenantFilters` já DESLIGA por completo (não nega)\r\nquando `IdClinicaFiltro == null`, que é sempre o caso aqui, já que não há\r\nJWT. Ou seja: só tirar aquela chamada NÃO resolveria nada sozinho, o filtro de\r\ntenant já está inerte para uma chamada anônima.\r\n            \r\nA correção real: o vazamento passa a ser uma decisão explícita e documentada, não\r\num acidente. Os campos abaixo são globais DE PROPÓSITO (prefixo `ambiente*`),\r\nnão existe mais nenhuma contagem por clínica aqui, e quem precisar de números\r\nisolados por clínica usa M:Kura.Api.Controllers.MetricsController.GetMetricsClinica (autenticado, abaixo).\r\nA chamada que ignorava os query filters foi removida daqui porque sem ela o\r\nfiltro de `StAtiva` (soft delete) volta a valer nas queries abaixo — as\r\ncontagens passam a refletir só registros ativos, mais correto para um SLO do\r\nque contar linhas soft-deletadas.",
+        "summary": "TASK-45 — decisão de escopo deste endpoint (ver KURA_BACKLOG_FIX_3.md / CLAUDE.md,\nseção \"Multi-tenancy no .NET\"):\n            \nEste GET raiz continua Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute por exigência de\nrubrica FIAP (monitoramento externo sem credencial). Antes ele vazava volume\ncross-tenant \"por acidente\", chamando explicitamente o método do EF Core que\nignora todos os query filters do `DbContext` (inclusive o de tenant) — e\nisso era redundante: o filtro de tenant em\n`KuraDbContext.ApplyTenantFilters` já DESLIGA por completo (não nega)\nquando `IdClinicaFiltro == null`, que é sempre o caso aqui, já que não há\nJWT. Ou seja: só tirar aquela chamada NÃO resolveria nada sozinho, o filtro de\ntenant já está inerte para uma chamada anônima.\n            \nA correção real: o vazamento passa a ser uma decisão explícita e documentada, não\num acidente. Os campos abaixo são globais DE PROPÓSITO (prefixo `ambiente*`),\nnão existe mais nenhuma contagem por clínica aqui, e quem precisar de números\nisolados por clínica usa M:Kura.Api.Controllers.MetricsController.GetMetricsClinica (autenticado, abaixo).\nA chamada que ignorava os query filters foi removida daqui porque sem ela o\nfiltro de `StAtiva` (soft delete) volta a valer nas queries abaixo — as\ncontagens passam a refletir só registros ativos, mais correto para um SLO do\nque contar linhas soft-deletadas.",
         "responses": {
           "200": {
             "description": "Métricas retornadas com sucesso."
@@ -4448,7 +4448,7 @@
         "tags": [
           "Metrics"
         ],
-        "summary": "Contrapartida autenticada de M:Kura.Api.Controllers.MetricsController.GetMetrics (TASK-45): contagens\r\nescopadas para a clínica do JWT, para quem precisa de números por clínica em vez\r\ndo agregado global. Filtra explicitamente por `IdClinica` no predicado do\r\nLINQ — não delega ao query filter ambiente do EF — porque a intenção aqui é não\r\ndepender silenciosamente de `IdClinicaFiltro` nunca vir null neste endpoint;\r\no filtro do `DbContext` ainda se aplica por cima, como defesa em profundidade.",
+        "summary": "Contrapartida autenticada de M:Kura.Api.Controllers.MetricsController.GetMetrics (TASK-45): contagens\nescopadas para a clínica do JWT, para quem precisa de números por clínica em vez\ndo agregado global. Filtra explicitamente por `IdClinica` no predicado do\nLINQ — não delega ao query filter ambiente do EF — porque a intenção aqui é não\ndepender silenciosamente de `IdClinicaFiltro` nunca vir null neste endpoint;\no filtro do `DbContext` ainda se aplica por cima, como defesa em profundidade.",
         "responses": {
           "200": {
             "description": "Métricas retornadas com sucesso."
@@ -5188,8 +5188,8 @@
         "tags": [
           "Pets"
         ],
-        "summary": "Sobe a foto do pet (2 variantes, geradas pelo cliente — FT-07): `thumb` (256px,\r\nlista/avatar) e `media` (1080px, detalhe). Tipo real validado por magic bytes\r\n(JPEG/PNG/WebP), nunca por `Content-Type` do cliente — FT-03/backlog\r\n`KURA_BACKLOG_FOTO_PET.md`, regra A4/\"Validação no servidor\". Troca de foto:\r\ngrava as novas, atualiza a linha, só DEPOIS exclui as antigas.",
-        "description": "\r\n\uD83D\uDD34 <b>Fix wave G2 (g2-ft03.md, achado G2-e).</b> Este endpoint lê o multipart ELE\r\n             MESMO (M:Microsoft.AspNetCore.Http.HttpRequest.ReadFormAsync(System.Threading.CancellationToken)) em vez de receber\r\n             `[FromForm] PetFotoUploadDto` como parâmetro, porque `PetFotoUploadDto`\r\n             deixou de ter `IFormFile`/`[FromForm]` — `Kura.Application` não pode\r\n             depender de `Microsoft.AspNetCore.*`. A validação (magic bytes, presença,\r\n             tamanho) roda manualmente aqui via Kura.Api.Controllers.PetsController._validadorFoto.\r\n\r\n\uD83D\uDD34 <b>Fix wave 2 (re-G2, g2b-ft03.md, achados re-G2-1/re-G2-2) — ONDE o 413 de\r\n             verdade é produzido.</b> A fix wave 1 detectava o 413 por SUBSTRING numa mensagem de\r\n             ModelState (`\"Request body too large\"`), num factory GLOBAL em `Program.cs` —\r\n             a re-G2 mediu que isso é disparável por INPUT DO CLIENTE em qualquer rota do projeto\r\n             (`GET /api/v1/agenda?dataInicio=Request%20body%20too%20large&...` devolvia 413\r\n             antes desta fix, quando devia devolver 400). Fix: Kura.Api.Filters.DesabilitaFormValueProvidersAttribute\r\n             remove os `IValueProviderFactory` de FORM só para ESTA action, então nada chama\r\n             `Request.ReadFormAsync()` durante o model binding — o\r\n             Microsoft.AspNetCore.Http.BadHttpRequestException(413) que o Kestrel\r\n             lança quando o corpo estoura Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute sobe CRU até o\r\n             `ExceptionHandlerMiddleware`, que já tem um case POR TIPO para ele. O\r\n             `Request.ReadFormAsync(ct)` desta action passa a ser a PRIMEIRA leitura do form\r\n             (não uma segunda, depois de um model binder já ter lido e falhado): para corpo acima do\r\n             limite a action É alcançada, e é este `ReadFormAsync` que lança a exceção de 413,\r\n             que sobe crua até o middleware (medido na G2c: sonda na entrada da action). Provado com\r\n             `UseKestrel()` real: `Content-Length` e `chunked` acima do limite → 413\r\n             `application/problem+json`; corpo válido menor que o limite → 200; spoof na query\r\n             string de outra rota → 400 (não mais 413). Ver `PetFotoKestrelHttpTests` e o\r\n             relatório da task.",
+        "summary": "Sobe a foto do pet (2 variantes, geradas pelo cliente — FT-07): `thumb` (256px,\nlista/avatar) e `media` (1080px, detalhe). Tipo real validado por magic bytes\n(JPEG/PNG/WebP), nunca por `Content-Type` do cliente — FT-03/backlog\n`KURA_BACKLOG_FOTO_PET.md`, regra A4/\"Validação no servidor\". Troca de foto:\ngrava as novas, atualiza a linha, só DEPOIS exclui as antigas.",
+        "description": "\n\uD83D\uDD34 <b>Fix wave G2 (g2-ft03.md, achado G2-e).</b> Este endpoint lê o multipart ELE\n             MESMO (M:Microsoft.AspNetCore.Http.HttpRequest.ReadFormAsync(System.Threading.CancellationToken)) em vez de receber\n             `[FromForm] PetFotoUploadDto` como parâmetro, porque `PetFotoUploadDto`\n             deixou de ter `IFormFile`/`[FromForm]` — `Kura.Application` não pode\n             depender de `Microsoft.AspNetCore.*`. A validação (magic bytes, presença,\n             tamanho) roda manualmente aqui via Kura.Api.Controllers.PetsController._validadorFoto.\n\n\uD83D\uDD34 <b>Fix wave 2 (re-G2, g2b-ft03.md, achados re-G2-1/re-G2-2) — ONDE o 413 de\n             verdade é produzido.</b> A fix wave 1 detectava o 413 por SUBSTRING numa mensagem de\n             ModelState (`\"Request body too large\"`), num factory GLOBAL em `Program.cs` —\n             a re-G2 mediu que isso é disparável por INPUT DO CLIENTE em qualquer rota do projeto\n             (`GET /api/v1/agenda?dataInicio=Request%20body%20too%20large&...` devolvia 413\n             antes desta fix, quando devia devolver 400). Fix: Kura.Api.Filters.DesabilitaFormValueProvidersAttribute\n             remove os `IValueProviderFactory` de FORM só para ESTA action, então nada chama\n             `Request.ReadFormAsync()` durante o model binding — o\n             Microsoft.AspNetCore.Http.BadHttpRequestException(413) que o Kestrel\n             lança quando o corpo estoura Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute sobe CRU até o\n             `ExceptionHandlerMiddleware`, que já tem um case POR TIPO para ele. O\n             `Request.ReadFormAsync(ct)` desta action passa a ser a PRIMEIRA leitura do form\n             (não uma segunda, depois de um model binder já ter lido e falhado): para corpo acima do\n             limite a action É alcançada, e é este `ReadFormAsync` que lança a exceção de 413,\n             que sobe crua até o middleware (medido na G2c: sonda na entrada da action). Provado com\n             `UseKestrel()` real: `Content-Length` e `chunked` acima do limite → 413\n             `application/problem+json`; corpo válido menor que o limite → 200; spoof na query\n             string de outra rota → 400 (não mais 413). Ver `PetFotoKestrelHttpTests` e o\n             relatório da task.",
         "parameters": [
           {
             "name": "id",
@@ -5316,7 +5316,7 @@
           "PetsV2"
         ],
         "summary": "Lista pets (paginado, ordenado, filtrado).",
-        "description": "Exemplo: `GET /api/v2/pets?pageSize=2&sort=-dtNascimento&porte=M&nome=rex`.\r\nResposta 200:\r\n```\r\n{ \"items\": [ { \"id\": 12, \"nmPet\": \"Rex\", \"sgPorte\": \"M\",\r\n    \"_links\": { \"self\": { \"href\": \"/api/v2/pets/12\" }, \"laudos\": { \"href\": \"/api/v1/pets/12/laudos\" },\r\n                \"editar\": { \"href\": \"/api/v1/pets/12\", \"method\": \"PUT\" } } } ],\r\n  \"page\": 1, \"pageSize\": 2, \"total\": 1, \"totalPages\": 1,\r\n  \"_links\": { \"self\": { \"href\": \"/api/v2/pets?...\" }, \"first\": { \"href\": \"...\" }, \"last\": { \"href\": \"...\" } } }\r\n```\r\nA busca por `nome` é feita com `LOWER(...) LIKE` (sem caixa) no banco.",
+        "description": "Exemplo: `GET /api/v2/pets?pageSize=2&sort=-dtNascimento&porte=M&nome=rex`.\nResposta 200:\n```\n{ \"items\": [ { \"id\": 12, \"nmPet\": \"Rex\", \"sgPorte\": \"M\",\n    \"_links\": { \"self\": { \"href\": \"/api/v2/pets/12\" }, \"laudos\": { \"href\": \"/api/v1/pets/12/laudos\" },\n                \"editar\": { \"href\": \"/api/v1/pets/12\", \"method\": \"PUT\" } } } ],\n  \"page\": 1, \"pageSize\": 2, \"total\": 1, \"totalPages\": 1,\n  \"_links\": { \"self\": { \"href\": \"/api/v2/pets?...\" }, \"first\": { \"href\": \"...\" }, \"last\": { \"href\": \"...\" } } }\n```\nA busca por `nome` é feita com `LOWER(...) LIKE` (sem caixa) no banco.",
         "operationId": "ListarPetsV2",
         "parameters": [
           {
@@ -5496,7 +5496,7 @@
         "tags": [
           "ServicosPreco"
         ],
-        "summary": "Lista os serviços da tabela de preços da clínica do token. FD-16: com\r\n`incluirInativos=true` traz também os desativados (default: só ativos, igual ao\r\ncomportamento anterior à FD-16).",
+        "summary": "Lista os serviços da tabela de preços da clínica do token. FD-16: com\n`incluirInativos=true` traz também os desativados (default: só ativos, igual ao\ncomportamento anterior à FD-16).",
         "parameters": [
           {
             "name": "incluirInativos",
@@ -5538,7 +5538,7 @@
             }
           },
           "400": {
-            "description": "`incluirInativos` fora de `true`/`false` — o model binder de\r\n            `bool` não-anulável recusa `1`, `0`, `on` e vazio com\r\n            `400`. Medido na revisão G2 da FD-16, não inferido.",
+            "description": "`incluirInativos` fora de `true`/`false` — o model binder de\n            `bool` não-anulável recusa `1`, `0`, `on` e vazio com\n            `400`. Medido na revisão G2 da FD-16, não inferido.",
             "content": {
               "text/plain": {
                 "schema": {
@@ -5791,7 +5791,7 @@
         "tags": [
           "ServicosPreco"
         ],
-        "summary": "Atualiza nome e preço. ⚠️ <b>Não altera nenhuma cobrança já lançada</b> —\r\n`COBRANCA.VL_COBRADO` guarda a cópia do valor do momento do lançamento (FD-08).",
+        "summary": "Atualiza nome e preço. ⚠️ <b>Não altera nenhuma cobrança já lançada</b> —\n`COBRANCA.VL_COBRADO` guarda a cópia do valor do momento do lançamento (FD-08).",
         "parameters": [
           {
             "name": "id",
@@ -6033,7 +6033,7 @@
         "tags": [
           "ServicosPreco"
         ],
-        "summary": "Reativa um serviço desativado desta clínica. Existe para que desativar não seja porta\r\nde mão única para o <b>id</b> — recadastrar resolveria o nome, mas criaria linha nova,\r\ne `COBRANCA.ID_SERVICO_PRECO` aponta para o id.",
+        "summary": "Reativa um serviço desativado desta clínica. Existe para que desativar não seja porta\nde mão única para o <b>id</b> — recadastrar resolveria o nome, mas criaria linha nova,\ne `COBRANCA.ID_SERVICO_PRECO` aponta para o id.",
         "parameters": [
           {
             "name": "id",
@@ -6154,7 +6154,7 @@
         "tags": [
           "Teleconsulta"
         ],
-        "summary": "Cria a sala de videochamada do agendamento (ou retorna a já existente, de forma idempotente).\r\nSe o provedor Daily.co falhar, retorna StFallbackManual=true para entrada de link externo manual.",
+        "summary": "Cria a sala de videochamada do agendamento (ou retorna a já existente, de forma idempotente).\nSe o provedor Daily.co falhar, retorna StFallbackManual=true para entrada de link externo manual.",
         "parameters": [
           {
             "name": "idAgendamento",
@@ -6693,7 +6693,7 @@
         "tags": [
           "Tutores"
         ],
-        "summary": "TASK-67: busca o contexto completo de um tutor (clínica + pets) pelo número de\r\nWhatsApp. Consumido pela IA Luna antes de registrar interações/triagens — chamada\r\nservidor-a-servidor, autenticada por API Key (ver Kura.Api.Filters.LunaApiKeyAuthFilter),\r\nnunca pelo JWT de clínica exigido pelo resto deste controller ([AllowAnonymous]\r\nsobrepõe o [Authorize] de classe só nesta ação).",
+        "summary": "TASK-67: busca o contexto completo de um tutor (clínica + pets) pelo número de\nWhatsApp. Consumido pela IA Luna antes de registrar interações/triagens — chamada\nservidor-a-servidor, autenticada por API Key (ver Kura.Api.Filters.LunaApiKeyAuthFilter),\nnunca pelo JWT de clínica exigido pelo resto deste controller ([AllowAnonymous]\nsobrepõe o [Authorize] de classe só nesta ação).",
         "parameters": [
           {
             "name": "numero",
@@ -6774,7 +6774,7 @@
         "tags": [
           "Tutores"
         ],
-        "summary": "REC-02 (KURA_BACKLOG_RECEPCAO.md): reemite o convite de onboarding de um tutor — gera um\r\nnovo token (7 dias) e cancela todo invite ativo e ainda não utilizado do mesmo tutor.\r\nMesma política de papel das outras rotas deste controller ([Authorize] de classe —\r\nGESTOR e VETERINARIO são os únicos 2 papéis existentes hoje).",
+        "summary": "REC-02 (KURA_BACKLOG_RECEPCAO.md): reemite o convite de onboarding de um tutor — gera um\nnovo token (7 dias) e cancela todo invite ativo e ainda não utilizado do mesmo tutor.\nMesma política de papel das outras rotas deste controller ([Authorize] de classe —\nGESTOR e VETERINARIO são os únicos 2 papéis existentes hoje).",
         "parameters": [
           {
             "name": "id",
@@ -7011,7 +7011,7 @@
         "tags": [
           "UsuariosClinica"
         ],
-        "summary": "Lista os usuários da clínica do token. FD-16: com `incluirInativos=true` traz\r\ntambém os desativados (default: só ativos, igual ao comportamento anterior à FD-16).\r\n⚠️ Autorização desta rota NÃO mudou com a FD-15 — continua `SomenteGestor`,\r\nherdada do controller (ver doc-comment da classe). A FD-15 abriu leitura só de\r\n`servicos-preco`.",
+        "summary": "Lista os usuários da clínica do token. FD-16: com `incluirInativos=true` traz\ntambém os desativados (default: só ativos, igual ao comportamento anterior à FD-16).\n⚠️ Autorização desta rota NÃO mudou com a FD-15 — continua `SomenteGestor`,\nherdada do controller (ver doc-comment da classe). A FD-15 abriu leitura só de\n`servicos-preco`.",
         "parameters": [
           {
             "name": "incluirInativos",
@@ -7053,7 +7053,7 @@
             }
           },
           "400": {
-            "description": "`incluirInativos` fora de `true`/`false` — o model binder de\r\n            `bool` não-anulável recusa `1`, `0`, `on` e vazio com\r\n            `400`. Medido na revisão G2 da FD-16, não inferido.",
+            "description": "`incluirInativos` fora de `true`/`false` — o model binder de\n            `bool` não-anulável recusa `1`, `0`, `on` e vazio com\n            `400`. Medido na revisão G2 da FD-16, não inferido.",
             "content": {
               "text/plain": {
                 "schema": {
@@ -7118,7 +7118,7 @@
         "tags": [
           "UsuariosClinica"
         ],
-        "summary": "Cria um usuário na clínica do token. A senha é gravada como hash BCrypt e nunca é\r\ndevolvida.",
+        "summary": "Cria um usuário na clínica do token. A senha é gravada como hash BCrypt e nunca é\ndevolvida.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -7428,7 +7428,7 @@
         "tags": [
           "UsuariosClinica"
         ],
-        "summary": "Define a senha de um usuário da clínica. ⚠️ Não é recuperação de senha por\r\nautosserviço (fora de escopo na FD-04): é administração feita por quem já provou ser\r\nGESTOR daquela clínica.",
+        "summary": "Define a senha de um usuário da clínica. ⚠️ Não é recuperação de senha por\nautosserviço (fora de escopo na FD-04): é administração feita por quem já provou ser\nGESTOR daquela clínica.",
         "parameters": [
           {
             "name": "id",
@@ -7511,7 +7511,7 @@
         "tags": [
           "UsuariosClinica"
         ],
-        "summary": "\uD83D\uDD34 <b>A-3 (fix wave pós-G2)</b> — reativa um usuário desativado desta clínica.\r\n            \r\n\r\nExiste porque, sem ele, desativar era <b>porta de mão única</b>: o usuário sumia\r\nda lista, o e-mail ficava reservado para sempre (a linha continua ocupando\r\n`UK_USUARIO_CLINICA_EMAIL`) e não havia caminho de volta dentro do produto — e o\r\nescopo negativo da FD-04 já retirou recuperação de senha, convite e super-admin.\r\nHerda `[Authorize(Policy = SomenteGestor)]` do controller e o escopo de\r\ntenant do service: id de outra clínica devolve `404`, como todos os demais verbos.",
+        "summary": "\uD83D\uDD34 <b>A-3 (fix wave pós-G2)</b> — reativa um usuário desativado desta clínica.\n            \n\nExiste porque, sem ele, desativar era <b>porta de mão única</b>: o usuário sumia\nda lista, o e-mail ficava reservado para sempre (a linha continua ocupando\n`UK_USUARIO_CLINICA_EMAIL`) e não havia caminho de volta dentro do produto — e o\nescopo negativo da FD-04 já retirou recuperação de senha, convite e super-admin.\nHerda `[Authorize(Policy = SomenteGestor)]` do controller e o escopo de\ntenant do service: id de outra clínica devolve `404`, como todos os demais verbos.",
         "parameters": [
           {
             "name": "id",
@@ -7593,7 +7593,7 @@
           "Veterinarios"
         ],
         "summary": "Lista os veterinários da clínica autenticada.",
-        "description": "\uD83D\uDD34 <b>FD-05 (fix wave pós-G2, R-2): o parâmetro de query `clinicaId` foi\r\nREMOVIDO.</b> Ele <b>parecia</b> escopar por clínica e não escopava nada: o query filter\r\nde tenant já restringe a consulta ao `clinicaId` do JWT, então o parâmetro só\r\nconseguia produzir dois resultados — a <b>própria</b> lista (quando o valor coincidia com\r\no token) ou uma lista <b>vazia</b> (qualquer outro valor). Superfície que anuncia um poder\r\nque não tem é a mesma família de \"UI para dado sem produtor\" — e, num endpoint\r\nmulti-tenant, ela convida exatamente a tentativa que a FD-05 fechou na escrita.\r\n            \r\n\r\n⚠️ <b>Compatível para trás:</b> cliente que ainda mande `?clinicaId=` não\r\nrecebe erro — o ASP.NET ignora parâmetro de query não vinculado, do mesmo jeito que o\r\n`System.Text.Json` ignora o `idClinica` que sumiu do corpo do `POST`. Para\r\nquem mandava a própria clínica o efeito é idêntico; para quem mandava outra, a resposta\r\ndeixa de ser uma lista vazia enganosa e passa a ser a lista correta do próprio tenant.",
+        "description": "\uD83D\uDD34 <b>FD-05 (fix wave pós-G2, R-2): o parâmetro de query `clinicaId` foi\nREMOVIDO.</b> Ele <b>parecia</b> escopar por clínica e não escopava nada: o query filter\nde tenant já restringe a consulta ao `clinicaId` do JWT, então o parâmetro só\nconseguia produzir dois resultados — a <b>própria</b> lista (quando o valor coincidia com\no token) ou uma lista <b>vazia</b> (qualquer outro valor). Superfície que anuncia um poder\nque não tem é a mesma família de \"UI para dado sem produtor\" — e, num endpoint\nmulti-tenant, ela convida exatamente a tentativa que a FD-05 fechou na escrita.\n            \n\n⚠️ <b>Compatível para trás:</b> cliente que ainda mande `?clinicaId=` não\nrecebe erro — o ASP.NET ignora parâmetro de query não vinculado, do mesmo jeito que o\n`System.Text.Json` ignora o `idClinica` que sumiu do corpo do `POST`. Para\nquem mandava a própria clínica o efeito é idêntico; para quem mandava outra, a resposta\ndeixa de ser uma lista vazia enganosa e passa a ser a lista correta do próprio tenant.",
         "responses": {
           "200": {
             "description": "Lista retornada com sucesso.",
@@ -8107,7 +8107,7 @@
           }
         },
         "additionalProperties": false,
-        "description": "Envelope paginado HAL: `{ items, page, pageSize, total, totalPages, _links }`. Base\r\ncomum reaproveitada por toda lista paginada (S4-NET-03 em diante)."
+        "description": "Envelope paginado HAL: `{ items, page, pageSize, total, totalPages, _links }`. Base\ncomum reaproveitada por toda lista paginada (S4-NET-03 em diante)."
       },
       "AgendamentoItemDto": {
         "type": "object",
@@ -8880,7 +8880,7 @@
           }
         },
         "additionalProperties": false,
-        "description": "Laudo com `_links`. Herda os campos de Kura.Application.DTOs.Laudo.LaudoResponseDto (Application, sem\r\nlink nenhum) e acrescenta só o que é da camada Api."
+        "description": "Laudo com `_links`. Herda os campos de Kura.Application.DTOs.Laudo.LaudoResponseDto (Application, sem\nlink nenhum) e acrescenta só o que é da camada Api."
       },
       "LaudoHalDtoPaginaHalDto": {
         "type": "object",
@@ -8917,7 +8917,7 @@
           }
         },
         "additionalProperties": false,
-        "description": "Envelope paginado HAL: `{ items, page, pageSize, total, totalPages, _links }`. Base\r\ncomum reaproveitada por toda lista paginada (S4-NET-03 em diante)."
+        "description": "Envelope paginado HAL: `{ items, page, pageSize, total, totalPages, _links }`. Base\ncomum reaproveitada por toda lista paginada (S4-NET-03 em diante)."
       },
       "LeituraTemperaturaCreateDto": {
         "type": "object",
@@ -8996,7 +8996,7 @@
           }
         },
         "additionalProperties": false,
-        "description": "Um link HAL: `{ \"href\": \"...\", \"method\": \"DELETE\" }`. `method` é extensão documentada\r\n(opcional no HAL) e só aparece em AÇÕES (ausente = GET)."
+        "description": "Um link HAL: `{ \"href\": \"...\", \"method\": \"DELETE\" }`. `method` é extensão documentada\n(opcional no HAL) e só aparece em AÇÕES (ausente = GET)."
       },
       "LoginDto": {
         "type": "object",
@@ -9337,7 +9337,7 @@
           }
         },
         "additionalProperties": false,
-        "description": "Pet da v2: os MESMOS campos de Kura.Application.DTOs.Pet.PetResponseDto (a v2 não expõe campo a mais que a\r\nv1) mais `_links`. Kura.Application.DTOs.Pet.PetResponseDto é `sealed` e vive na camada Application\r\n(sem link nenhum); por isso a cópia explícita em M:Kura.Api.Hal.PetHalDto.De(Kura.Application.DTOs.Pet.PetResponseDto,System.Collections.Generic.Dictionary{System.String,Kura.Api.Hal.LinkHal})."
+        "description": "Pet da v2: os MESMOS campos de Kura.Application.DTOs.Pet.PetResponseDto (a v2 não expõe campo a mais que a\nv1) mais `_links`. Kura.Application.DTOs.Pet.PetResponseDto é `sealed` e vive na camada Application\n(sem link nenhum); por isso a cópia explícita em M:Kura.Api.Hal.PetHalDto.De(Kura.Application.DTOs.Pet.PetResponseDto,System.Collections.Generic.Dictionary{System.String,Kura.Api.Hal.LinkHal})."
       },
       "PetHalDtoPaginaHalDto": {
         "type": "object",
@@ -9374,7 +9374,7 @@
           }
         },
         "additionalProperties": false,
-        "description": "Envelope paginado HAL: `{ items, page, pageSize, total, totalPages, _links }`. Base\r\ncomum reaproveitada por toda lista paginada (S4-NET-03 em diante)."
+        "description": "Envelope paginado HAL: `{ items, page, pageSize, total, totalPages, _links }`. Base\ncomum reaproveitada por toda lista paginada (S4-NET-03 em diante)."
       },
       "PetResponseDto": {
         "type": "object",
@@ -10316,7 +10316,7 @@
           }
         },
         "additionalProperties": false,
-        "description": "Envelope paginado HAL: `{ items, page, pageSize, total, totalPages, _links }`. Base\r\ncomum reaproveitada por toda lista paginada (S4-NET-03 em diante)."
+        "description": "Envelope paginado HAL: `{ items, page, pageSize, total, totalPages, _links }`. Base\ncomum reaproveitada por toda lista paginada (S4-NET-03 em diante)."
       },
       "TutorResponseDto": {
         "type": "object",

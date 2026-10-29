@@ -132,15 +132,39 @@ public class OpenApiDocumentoTests : IClassFixture<KuraApiFactory>
         return Normalizar(await resposta.Content.ReadAsStringAsync());
     }
 
+    /// <summary>
+    /// As descrições do Swagger vêm dos comentários XML do código-fonte, cuja quebra de linha depende do checkout:
+    /// CRLF no Windows (autocrlf) e LF no Linux do CI. Sem normalizar os VALORES de texto, o mesmo comentário vira
+    /// <c>"\r\n"</c> num lugar e <c>"\n"</c> no outro, e o documento versionado nunca bate no CI.
+    /// </summary>
     private static string Normalizar(string json)
     {
-        var no = JsonNode.Parse(json)!;
+        var no = NormalizarQuebrasDeLinha(JsonNode.Parse(json)!)!;
         var texto = no.ToJsonString(new JsonSerializerOptions
         {
             WriteIndented = true,
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         });
         return texto.Replace("\r\n", "\n").TrimEnd() + "\n";
+    }
+
+    private static JsonNode? NormalizarQuebrasDeLinha(JsonNode? no)
+    {
+        switch (no)
+        {
+            case JsonObject objeto:
+                foreach (var chave in objeto.Select(p => p.Key).ToList())
+                    objeto[chave] = NormalizarQuebrasDeLinha(objeto[chave]?.DeepClone());
+                return objeto;
+            case JsonArray lista:
+                for (var i = 0; i < lista.Count; i++)
+                    lista[i] = NormalizarQuebrasDeLinha(lista[i]?.DeepClone());
+                return lista;
+            case JsonValue valor when valor.TryGetValue<string>(out var texto):
+                return JsonValue.Create(texto.Replace("\r\n", "\n"));
+            default:
+                return no;
+        }
     }
 
     /// <summary>Raiz do repositório = pasta que contém <c>KuraApi.slnx</c>; o arquivo vive em <c>docs/openapi.json</c>.</summary>
