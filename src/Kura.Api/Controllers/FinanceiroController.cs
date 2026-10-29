@@ -42,7 +42,8 @@ using Microsoft.AspNetCore.Mvc;
 /// <para>
 /// ⛔ <b>Escopo negativo (D-1/D-6):</b> sem imposto, repasse ou margem — o campo é
 /// <c>receitaBruta</c>, com essas palavras. Sem gateway, status de pagamento, projeção ou
-/// previsão. Sem mix por veterinário, sem estoque, sem exportação.
+/// previsão. Sem mix por veterinário, sem estoque, sem exportação própria do .NET (as duas
+/// rotas montadas pelo package Oracle, S4-DB-06, são a única exceção e só devolvem JSON pronto).
 /// </para>
 /// </summary>
 [Authorize(Policy = PoliticasAutorizacao.SomenteGestor)]
@@ -51,8 +52,47 @@ using Microsoft.AspNetCore.Mvc;
 public class FinanceiroController : ControllerBase
 {
     private readonly IFinanceiroService _service;
+    private readonly ICobrancaOracleService _oracle;
 
-    public FinanceiroController(IFinanceiroService service) => _service = service;
+    public FinanceiroController(IFinanceiroService service, ICobrancaOracleService oracle)
+    {
+        _service = service;
+        _oracle = oracle;
+    }
+
+    /// <summary>
+    /// Exportação das cobranças ativas da clínica do token em JSON, <b>montada pelo package
+    /// Oracle</b> <c>PKG_COBRANCA.LISTAR_JSON</c> (S4-DB-06). Devolve um array (<c>[]</c> se a
+    /// clínica não tem cobrança). O escopo é sempre a clínica do token: não há parâmetro de
+    /// clínica. <c>404</c> se a clínica do token não existe ou está inativa; <c>503</c> se a
+    /// rotina Oracle está indisponível.
+    /// </summary>
+    [HttpGet("cobrancas/exportacao-json")]
+    [ProducesResponseType(typeof(System.Text.Json.JsonElement), 200, "application/json")]
+    [ProducesResponseType(401)]
+    [ProducesResponseType(403)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(503)]
+    [ProducesResponseType(500)]
+    public async Task<IActionResult> ExportarCobrancasJson(CancellationToken ct) =>
+        Content(await _oracle.ExportarJsonAsync(ct), "application/json");
+
+    /// <summary>
+    /// Relatório de cobranças por forma de pagamento da clínica do token, <b>montado pelo
+    /// package Oracle</b> <c>PKG_COBRANCA.RELATORIO_JSON</c> (S4-DB-06): objeto com
+    /// <c>grupos</c> (forma e total) e <c>subTotal</c>. O escopo é sempre a clínica do token.
+    /// <c>404</c> se a clínica do token não existe ou está inativa; <c>503</c> se a rotina
+    /// Oracle está indisponível.
+    /// </summary>
+    [HttpGet("cobrancas/relatorio-oracle")]
+    [ProducesResponseType(typeof(System.Text.Json.JsonElement), 200, "application/json")]
+    [ProducesResponseType(401)]
+    [ProducesResponseType(403)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(503)]
+    [ProducesResponseType(500)]
+    public async Task<IActionResult> RelatorioCobrancasOracle(CancellationToken ct) =>
+        Content(await _oracle.RelatorioJsonAsync(ct), "application/json");
 
     /// <summary>
     /// Resumo financeiro da clínica do token no período: <b>receita bruta</b>, <b>ticket

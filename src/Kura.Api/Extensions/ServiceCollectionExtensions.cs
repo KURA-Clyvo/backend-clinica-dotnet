@@ -62,6 +62,7 @@ public static class ServiceCollectionExtensions
 
         // FD-11 - KPI financeiros agregados (leitura so, sem UnitOfWork).
         services.AddScoped<IFinanceiroService, FinanceiroService>();
+        services.AddScoped<ICobrancaOracleService, CobrancaOracleService>();
         services.AddScoped<IDashboardService, DashboardService>();
         services.AddScoped<IAgendaService, AgendaService>();
         services.AddScoped<ILunaService, LunaService>();
@@ -108,6 +109,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IUsuarioClinicaRepository, UsuarioClinicaRepository>();
         services.AddScoped<IServicoPrecoRepository, ServicoPrecoRepository>();
         services.AddScoped<ICobrancaRepository, CobrancaRepository>();
+        services.AddScoped<IRotinasCobrancaOracle, Kura.Infrastructure.RotinasOracle.RotinasCobrancaOracle>();
         services.AddScoped<ITutorRepository, TutorRepository>();
         services.AddScoped<IPetRepository, PetRepository>();
         services.AddScoped<ITutorPetRepository, TutorPetRepository>();
