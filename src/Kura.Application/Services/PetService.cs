@@ -5,6 +5,7 @@ using Kura.Application.Services.Interfaces;
 using Kura.Domain.Entities;
 using Kura.Domain.Exceptions;
 using Kura.Domain.Interfaces;
+using Kura.Domain.Paginacao;
 using Kura.Domain.Storage;
 
 public sealed class PetService : IPetService
@@ -47,9 +48,25 @@ public sealed class PetService : IPetService
         return result;
     }
 
+    public async Task<PaginaDe<PetResponseDto>> ListarPaginadoAsync(ConsultaPets consulta)
+    {
+        var pagina = await _repository.ListarPaginadoAsync(consulta, _clinicaContext.IdClinica);
+        var itens = new List<PetResponseDto>(pagina.Itens.Count);
+        foreach (var pet in pagina.Itens)
+            itens.Add(await BuildResponseAsync(pet));
+        return new PaginaDe<PetResponseDto>(itens, pagina.Pagina, pagina.TamanhoPagina, pagina.Total);
+    }
+
     public async Task<PetResponseDto> GetByIdAsync(long id)
     {
         var pet = await _repository.GetByIdWithTutoresAsync(id)
+            ?? throw new EntidadeNaoEncontradaException("Pet", id);
+        return await BuildResponseAsync(pet);
+    }
+
+    public async Task<PetResponseDto> ObterEscopadoAsync(long id)
+    {
+        var pet = await _repository.GetByIdComTutoresAsync(id, _clinicaContext.IdClinica)
             ?? throw new EntidadeNaoEncontradaException("Pet", id);
         return await BuildResponseAsync(pet);
     }

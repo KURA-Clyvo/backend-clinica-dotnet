@@ -7,6 +7,7 @@ using Kura.Application.Services.Interfaces;
 using Kura.Domain.Entities;
 using Kura.Domain.Exceptions;
 using Kura.Domain.Interfaces;
+using Kura.Domain.Paginacao;
 using Kura.Domain.Storage;
 using Kura.Domain.Tutores;
 
@@ -53,6 +54,12 @@ public sealed class TutorService : ITutorService
         // HasQueryFilter global do KuraDbContext (mesmo padrão de AgendaService/PetService).
         var tutores = await _repository.SearchAsync(busca, _clinicaContext.IdClinica);
         return tutores.Select(ToResponse);
+    }
+
+    public async Task<PaginaDe<TutorResponseDto>> ListarPaginadoAsync(ConsultaTutores consulta)
+    {
+        var pagina = await _repository.ListarPaginadoAsync(consulta, _clinicaContext.IdClinica);
+        return pagina.Mapear(ToResponse);
     }
 
     public async Task<TutorResponseDto> GetByIdAsync(long id)

@@ -41,7 +41,7 @@ public class TutoresController : ControllerBase
     /// <returns>Dados do tutor encontrado.</returns>
     /// <response code="200">Tutor encontrado.</response>
     /// <response code="404">Tutor não encontrado.</response>
-    [HttpGet("{id:long}")]
+    [HttpGet("{id:long}", Name = "ObterTutor")]
     [ProducesResponseType(typeof(TutorResponseDto), 200)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
     public async Task<IActionResult> GetById(long id)
@@ -57,7 +57,7 @@ public class TutoresController : ControllerBase
     /// <returns>Lista de pets do tutor.</returns>
     /// <response code="200">Lista retornada com sucesso.</response>
     /// <response code="404">Tutor não encontrado.</response>
-    [HttpGet("{id:long}/pets")]
+    [HttpGet("{id:long}/pets", Name = "PetsDoTutor")]
     [ProducesResponseType(typeof(IEnumerable<PetResponseDto>), 200)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
     public async Task<IActionResult> GetPets(long id)
@@ -142,7 +142,7 @@ public class TutoresController : ControllerBase
     /// <response code="200">Tutor atualizado.</response>
     /// <response code="400">Dados inválidos.</response>
     /// <response code="404">Tutor não encontrado.</response>
-    [HttpPut("{id:long}")]
+    [HttpPut("{id:long}", Name = "AtualizarTutor")]
     [ProducesResponseType(typeof(TutorResponseDto), 200)]
     [ProducesResponseType(typeof(ProblemDetails), 400)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
@@ -159,7 +159,7 @@ public class TutoresController : ControllerBase
     /// <returns>Sem conteúdo.</returns>
     /// <response code="204">Tutor inativado.</response>
     /// <response code="404">Tutor não encontrado.</response>
-    [HttpDelete("{id:long}")]
+    [HttpDelete("{id:long}", Name = "InativarTutor")]
     [ProducesResponseType(204)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
     public async Task<IActionResult> Delete(long id)

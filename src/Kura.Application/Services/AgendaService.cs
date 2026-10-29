@@ -5,6 +5,7 @@ using Kura.Application.Services.Interfaces;
 using Kura.CrossCutting.Observability;
 using Kura.Domain.Exceptions;
 using Kura.Domain.Interfaces;
+using Kura.Domain.Paginacao;
 using Kura.Domain.Storage;
 using Microsoft.Extensions.Logging;
 
@@ -184,11 +185,7 @@ public sealed class AgendaService : IAgendaService
         activity?.SetTag("kura.layer", "Application");
         activity?.SetTag("kura.intervalo_dias", (dataFim - dataInicio).TotalDays);
 
-        if (dataFim < dataInicio)
-            throw new RegraDeNegocioException("DataFim não pode ser anterior à DataInicio.");
-
-        if ((dataFim - dataInicio).TotalDays > 31)
-            throw new RegraDeNegocioException("Intervalo máximo de 31 dias.");
+        ValidarIntervalo(dataInicio, dataFim);
 
         var agendamentos = await _readRepository.GetByIntervaloAsync(
             _clinicaContext.IdClinica, dataInicio, dataFim, idVeterinario);
@@ -202,6 +199,66 @@ public sealed class AgendaService : IAgendaService
             Agendamentos = itens
         };
     }
+
+    private const int AnoMinimoAgenda = 2000;
+    private const int AnoMaximoAgenda = 2100;
+
+    /// <summary>Regra de intervalo compartilhada pela v1 e pela v2 (mensagens idênticas).</summary>
+    private static void ValidarIntervalo(DateTime dataInicio, DateTime dataFim)
+    {
+        // G2-I-1: 9999-12-01..9999-12-31 (30 dias) passava e estourava em DataFim.Date.AddDays(1)
+        // no repositório (DateTime.MaxValue) ⇒ 500. Ano fora de uma janela razoável é entrada inválida.
+        if (dataInicio.Year < AnoMinimoAgenda || dataInicio.Year > AnoMaximoAgenda
+            || dataFim.Year < AnoMinimoAgenda || dataFim.Year > AnoMaximoAgenda)
+            throw new RegraDeNegocioException(
+                $"Datas devem estar entre os anos {AnoMinimoAgenda} e {AnoMaximoAgenda}.");
+
+        if (dataFim < dataInicio)
+            throw new RegraDeNegocioException("DataFim não pode ser anterior à DataInicio.");
+
+        if ((dataFim - dataInicio).TotalDays > 31)
+            throw new RegraDeNegocioException("Intervalo máximo de 31 dias.");
+    }
+
+    public async Task<PaginaDe<AgendamentoItemDto>> ListarPaginadoAsync(ConsultaAgendamentos consulta)
+    {
+        using var activity = KuraActivitySource.Instancia.StartActivity("Application.AgendaService.ListarPaginadoAsync");
+        activity?.SetTag("kura.layer", "Application");
+
+        ValidarIntervalo(consulta.DataInicio, consulta.DataFim);
+
+        var pagina = await _readRepository.ListarPaginadoAsync(_clinicaContext.IdClinica, consulta);
+        return pagina.Mapear(ToItemDto);
+    }
+
+    /// <summary>
+    /// S4-NET-04 — status conhecidos pela máquina de estados (chaves de <see cref="TransicoesPermitidas"/>).
+    /// Usado para validar o filtro <c>status</c> da v2 sem uma segunda lista.
+    /// </summary>
+    public static IReadOnlyCollection<string> StatusConhecidos { get; } = TransicoesPermitidas.Keys.ToArray();
+
+    /// <summary>
+    /// S4-NET-04 — o status admite alguma transição de <c>ST_STATUS</c> (não é terminal)? Decide se
+    /// a v2 oferece a ação <c>status</c>. Lê o MESMO mapa que <see cref="AtualizarStatusAsync"/>.
+    /// </summary>
+    public static bool AdmiteTransicaoDeStatus(string? stStatus) =>
+        stStatus is not null && TransicoesPermitidas.TryGetValue(stStatus, out var destinos) && destinos.Length > 0;
+
+    /// <summary>
+    /// S4-NET-04 — check-in é aceito? Mesma regra de <see cref="CheckinAsync"/> exceto a guarda de
+    /// DIA (relógio) e de versão, que só podem ser avaliadas na chamada: status elegível, ainda sem
+    /// check-in (idempotente) e sem início de atendimento.
+    /// </summary>
+    public static bool AdmiteCheckin(string? stStatus, DateTime? dtCheckin, DateTime? dtInicioAtendimento) =>
+        StatusAdmiteEventoRecepcao(stStatus) && !dtCheckin.HasValue && !dtInicioAtendimento.HasValue;
+
+    /// <summary>S4-NET-04 — início de atendimento é aceito? Status elegível e ainda sem início.</summary>
+    public static bool AdmiteInicioAtendimento(string? stStatus, DateTime? dtInicioAtendimento) =>
+        StatusAdmiteEventoRecepcao(stStatus) && !dtInicioAtendimento.HasValue;
+
+    /// <summary>G2-m-4 — fonte única da guarda de status de check-in/início (leitura e escrita).</summary>
+    private static bool StatusAdmiteEventoRecepcao(string? stStatus) =>
+        stStatus is not null && StatusElegiveisParaEventoRecepcao.Contains(stStatus);
 
     public async Task<AgendamentoItemDto> AtualizarStatusAsync(long id, AtualizarStatusAgendamentoDto dto)
     {
@@ -415,7 +472,7 @@ public sealed class AgendaService : IAgendaService
         var agendamento = await _agendamentoRepository.GetByIdAsync(id, _clinicaContext.IdClinica)
             ?? throw new EntidadeNaoEncontradaException("Agendamento", id);
 
-        if (agendamento.StStatus is null || !StatusElegiveisParaEventoRecepcao.Contains(agendamento.StStatus))
+        if (!StatusAdmiteEventoRecepcao(agendamento.StStatus))
             throw new RegraDeNegocioException(
                 $"Agendamento {id} está com status '{agendamento.StStatus ?? "null"}' e não pode "
                 + "receber check-in. Só é possível fazer check-in a partir de AGENDADO ou "
@@ -427,7 +484,9 @@ public sealed class AgendaService : IAgendaService
         // G2 REC-11 (m-1): sem isto, um walk-in que já começou o atendimento (sem check-in
         // prévio, aceite legítimo da própria REC-11) podia "checar-in" DEPOIS do início --
         // DT_CHECKIN > DT_INICIO_ATENDIMENTO, e a espera por linha (A-6) sairia negativa.
-        if (agendamento.DtInicioAtendimento.HasValue)
+        // G2-m-4: neste ponto o status é elegível e DtCheckin é nulo, então AdmiteCheckin só
+        // devolve false por causa do início de atendimento — a MESMA regra que a v2 usa nos links.
+        if (!AdmiteCheckin(agendamento.StStatus, agendamento.DtCheckin, agendamento.DtInicioAtendimento))
             throw new RegraDeNegocioException(
                 $"Agendamento {id} já teve início de atendimento registrado em "
                 + $"{agendamento.DtInicioAtendimento:yyyy-MM-dd HH:mm} e não pode receber "
@@ -464,12 +523,13 @@ public sealed class AgendaService : IAgendaService
         var agendamento = await _agendamentoRepository.GetByIdAsync(id, _clinicaContext.IdClinica)
             ?? throw new EntidadeNaoEncontradaException("Agendamento", id);
 
-        if (agendamento.StStatus is null || !StatusElegiveisParaEventoRecepcao.Contains(agendamento.StStatus))
+        if (!StatusAdmiteEventoRecepcao(agendamento.StStatus))
             throw new RegraDeNegocioException(
                 $"Agendamento {id} está com status '{agendamento.StStatus ?? "null"}' e não pode "
                 + "iniciar atendimento. Só é possível iniciar a partir de AGENDADO ou CONFIRMADO.");
 
-        if (agendamento.DtInicioAtendimento.HasValue)
+        // G2-m-4: status já elegível ⇒ AdmiteInicioAtendimento só é false se já houve início (idempotente).
+        if (!AdmiteInicioAtendimento(agendamento.StStatus, agendamento.DtInicioAtendimento))
             return ToItemDto(agendamento);
 
         // G2 REC-11 (m-2, mesma regra do check-in): início só no DIA do agendamento.

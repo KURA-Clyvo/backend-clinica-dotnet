@@ -37,6 +37,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ILaudoService, LaudoService>();
         services.AddScoped<Kura.Api.Hal.IHalLinkFactory, Kura.Api.Hal.HalLinkFactory>();
         services.AddScoped<Kura.Api.Hal.LaudoHalMapper>();
+        services.AddScoped<Kura.Api.Hal.ListasV2HalMapper>();
 
         // GROUP C — Clinical events
         services.AddScoped<IEventoClinicoService, EventoClinicoService>();
