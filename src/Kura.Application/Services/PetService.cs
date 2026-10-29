@@ -64,6 +64,13 @@ public sealed class PetService : IPetService
         return await BuildResponseAsync(pet);
     }
 
+    public async Task<PetResponseDto> ObterEscopadoAsync(long id)
+    {
+        var pet = await _repository.GetByIdComTutoresAsync(id, _clinicaContext.IdClinica)
+            ?? throw new EntidadeNaoEncontradaException("Pet", id);
+        return await BuildResponseAsync(pet);
+    }
+
     public async Task<PetResponseDto> CreateAsync(PetCreateDto dto)
     {
         _ = await _tutorRepository.GetByIdAsync(dto.IdTutor)

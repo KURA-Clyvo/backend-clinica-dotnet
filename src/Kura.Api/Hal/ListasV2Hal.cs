@@ -102,7 +102,8 @@ public sealed class ListasV2HalMapper
 
     /// <summary>
     /// <c>self</c>, <c>vacinas</c>, <c>laudos</c>, <c>timeline</c>, <c>editar</c> (PUT), <c>inativar</c> (DELETE),
-    /// <c>adicionarTutor</c> (POST). Não há <c>GET /pets/{id}/tutores</c> na v1: os tutores vêm embutidos no
+    /// (sem <c>adicionarTutor</c>: <c>POST /api/v1/pets/{id}/tutores</c> responde 500 com corpo vazio — defeito
+    /// pré-existente da v1, G2-m-3 —, então não é anunciado). Não há <c>GET /pets/{id}/tutores</c> na v1: os tutores vêm embutidos no
     /// próprio pet (<c>tutores</c>), então não existe link de leitura para eles.
     /// </summary>
     public PetHalDto Mapear(PetResponseDto p)
@@ -116,7 +117,6 @@ public sealed class ListasV2HalMapper
             ["timeline"] = _links.Criar("TimelineDoPet", id),
             ["editar"] = _links.Criar("AtualizarPet", id, "PUT"),
             ["inativar"] = _links.Criar("InativarPet", id, "DELETE"),
-            ["adicionarTutor"] = _links.Criar("AdicionarTutorAoPet", id, "POST"),
         };
         return PetHalDto.De(p, links);
     }
@@ -136,7 +136,8 @@ public sealed class ListasV2HalMapper
     }
 
     /// <summary>
-    /// <c>pet</c> (quando há pet) e as ações de recepção/status SÓ quando a regra do
+    /// <c>pet</c> (quando há pet; G2-m-2: o item não informa se o pet segue ativo, então o link pode responder
+    /// 404 para pet inativado — decisão de não gastar consulta extra por item) e as ações de recepção/status SÓ quando a regra do
     /// <see cref="AgendaService"/> as admite para o estado atual. Não há <c>GET</c> v1 de detalhe de
     /// agendamento, então não existe <c>self</c> por item (o <c>self</c> está no envelope da lista).
     /// O dia do check-in e o <c>nrVersion</c> só são avaliados na chamada (422/409).

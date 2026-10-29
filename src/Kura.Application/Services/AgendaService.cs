@@ -200,9 +200,19 @@ public sealed class AgendaService : IAgendaService
         };
     }
 
+    private const int AnoMinimoAgenda = 2000;
+    private const int AnoMaximoAgenda = 2100;
+
     /// <summary>Regra de intervalo compartilhada pela v1 e pela v2 (mensagens idênticas).</summary>
     private static void ValidarIntervalo(DateTime dataInicio, DateTime dataFim)
     {
+        // G2-I-1: 9999-12-01..9999-12-31 (30 dias) passava e estourava em DataFim.Date.AddDays(1)
+        // no repositório (DateTime.MaxValue) ⇒ 500. Ano fora de uma janela razoável é entrada inválida.
+        if (dataInicio.Year < AnoMinimoAgenda || dataInicio.Year > AnoMaximoAgenda
+            || dataFim.Year < AnoMinimoAgenda || dataFim.Year > AnoMaximoAgenda)
+            throw new RegraDeNegocioException(
+                $"Datas devem estar entre os anos {AnoMinimoAgenda} e {AnoMaximoAgenda}.");
+
         if (dataFim < dataInicio)
             throw new RegraDeNegocioException("DataFim não pode ser anterior à DataInicio.");
 
@@ -240,13 +250,15 @@ public sealed class AgendaService : IAgendaService
     /// check-in (idempotente) e sem início de atendimento.
     /// </summary>
     public static bool AdmiteCheckin(string? stStatus, DateTime? dtCheckin, DateTime? dtInicioAtendimento) =>
-        stStatus is not null && StatusElegiveisParaEventoRecepcao.Contains(stStatus)
-        && !dtCheckin.HasValue && !dtInicioAtendimento.HasValue;
+        StatusAdmiteEventoRecepcao(stStatus) && !dtCheckin.HasValue && !dtInicioAtendimento.HasValue;
 
     /// <summary>S4-NET-04 — início de atendimento é aceito? Status elegível e ainda sem início.</summary>
     public static bool AdmiteInicioAtendimento(string? stStatus, DateTime? dtInicioAtendimento) =>
-        stStatus is not null && StatusElegiveisParaEventoRecepcao.Contains(stStatus)
-        && !dtInicioAtendimento.HasValue;
+        StatusAdmiteEventoRecepcao(stStatus) && !dtInicioAtendimento.HasValue;
+
+    /// <summary>G2-m-4 — fonte única da guarda de status de check-in/início (leitura e escrita).</summary>
+    private static bool StatusAdmiteEventoRecepcao(string? stStatus) =>
+        stStatus is not null && StatusElegiveisParaEventoRecepcao.Contains(stStatus);
 
     public async Task<AgendamentoItemDto> AtualizarStatusAsync(long id, AtualizarStatusAgendamentoDto dto)
     {
@@ -460,7 +472,7 @@ public sealed class AgendaService : IAgendaService
         var agendamento = await _agendamentoRepository.GetByIdAsync(id, _clinicaContext.IdClinica)
             ?? throw new EntidadeNaoEncontradaException("Agendamento", id);
 
-        if (agendamento.StStatus is null || !StatusElegiveisParaEventoRecepcao.Contains(agendamento.StStatus))
+        if (!StatusAdmiteEventoRecepcao(agendamento.StStatus))
             throw new RegraDeNegocioException(
                 $"Agendamento {id} está com status '{agendamento.StStatus ?? "null"}' e não pode "
                 + "receber check-in. Só é possível fazer check-in a partir de AGENDADO ou "
@@ -472,7 +484,9 @@ public sealed class AgendaService : IAgendaService
         // G2 REC-11 (m-1): sem isto, um walk-in que já começou o atendimento (sem check-in
         // prévio, aceite legítimo da própria REC-11) podia "checar-in" DEPOIS do início --
         // DT_CHECKIN > DT_INICIO_ATENDIMENTO, e a espera por linha (A-6) sairia negativa.
-        if (agendamento.DtInicioAtendimento.HasValue)
+        // G2-m-4: neste ponto o status é elegível e DtCheckin é nulo, então AdmiteCheckin só
+        // devolve false por causa do início de atendimento — a MESMA regra que a v2 usa nos links.
+        if (!AdmiteCheckin(agendamento.StStatus, agendamento.DtCheckin, agendamento.DtInicioAtendimento))
             throw new RegraDeNegocioException(
                 $"Agendamento {id} já teve início de atendimento registrado em "
                 + $"{agendamento.DtInicioAtendimento:yyyy-MM-dd HH:mm} e não pode receber "
@@ -509,12 +523,13 @@ public sealed class AgendaService : IAgendaService
         var agendamento = await _agendamentoRepository.GetByIdAsync(id, _clinicaContext.IdClinica)
             ?? throw new EntidadeNaoEncontradaException("Agendamento", id);
 
-        if (agendamento.StStatus is null || !StatusElegiveisParaEventoRecepcao.Contains(agendamento.StStatus))
+        if (!StatusAdmiteEventoRecepcao(agendamento.StStatus))
             throw new RegraDeNegocioException(
                 $"Agendamento {id} está com status '{agendamento.StStatus ?? "null"}' e não pode "
                 + "iniciar atendimento. Só é possível iniciar a partir de AGENDADO ou CONFIRMADO.");
 
-        if (agendamento.DtInicioAtendimento.HasValue)
+        // G2-m-4: status já elegível ⇒ AdmiteInicioAtendimento só é false se já houve início (idempotente).
+        if (!AdmiteInicioAtendimento(agendamento.StStatus, agendamento.DtInicioAtendimento))
             return ToItemDto(agendamento);
 
         // G2 REC-11 (m-2, mesma regra do check-in): início só no DIA do agendamento.

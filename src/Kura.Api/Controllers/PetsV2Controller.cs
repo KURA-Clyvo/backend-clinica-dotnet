@@ -121,5 +121,5 @@ public class PetsV2Controller : ControllerBase
     [ProducesResponseType(typeof(PetHalDto), 200)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
     public async Task<IActionResult> Obter(long id) =>
-        Ok(_mapper.Mapear(await _service.GetByIdAsync(id)));
+        Ok(_mapper.Mapear(await _service.ObterEscopadoAsync(id)));
 }

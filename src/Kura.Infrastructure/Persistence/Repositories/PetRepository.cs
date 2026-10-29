@@ -42,6 +42,14 @@ public class PetRepository : Repository<Pet>, IPetRepository
             .FirstOrDefaultAsync(p => p.Id == id && p.IdClinica == idClinica);
     }
 
+    public async Task<Pet?> GetByIdComTutoresAsync(long id, long idClinica)
+    {
+        return await _dbSet
+            .Include(p => p.TutorPets)
+                .ThenInclude(tp => tp.Tutor)
+            .FirstOrDefaultAsync(p => p.Id == id && p.IdClinica == idClinica);
+    }
+
     public async Task<PaginaDe<Pet>> ListarPaginadoAsync(ConsultaPets consulta, long idClinica)
     {
         // Query filter (StAtiva + tenant) continua valendo; IdClinica explícito é defesa em
