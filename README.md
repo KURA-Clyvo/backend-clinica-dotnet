@@ -198,9 +198,19 @@ Configuração: `Mongo__ConnectionString` (vazia = não configurado), `Mongo__Da
 teto: 3).
 
 > **Versões — leia antes de citar.** Os testes do repositório e do runner rodam contra um **mongod 8.0.26
-> embarcado (Mongo2Go 5.0.0)**, não contra o Mongo do compose/Azure (**7.0.x**). A equivalência de
-> `$jsonSchema` e índices entre 8.0 e 7.0 está **NÃO VERIFICADA** neste README. O deploy dos laudos na
-> Azure também está **NÃO VERIFICADO**.
+> embarcado (Mongo2Go 5.0.0)**. **Medido em 29/10/2026 pelo G4 da F1 no compose LOCAL, com MongoDB
+> 7.0.45 real** (fonte: `s4-net-g4.md`, frentes 1–4): o runner aplicou o `$jsonSchema` (`validationLevel
+> strict`, `additionalProperties: false`, 12 campos obrigatórios) e os 3 índices com a role real
+> `kura_dotnet_runtime`; duas clínicas pelo HTTP (outra clínica recebe `404` em lista, detalhe, arquivo e
+> `DELETE`); com o Mongo parado, `/health` devolve `200 Degraded` e os endpoints de laudos devolvem `503`
+> (`LAUDOS_INDISPONIVEL`) em ~3 s, enquanto o resto da API segue de pé, e tudo volta **sem reiniciar** a API;
+> `/api/v2` (pets, tutores, agendamentos) contra Oracle real com `total` igual ao `sqlplus`. Continua
+> **NÃO VERIFICADO**: o deploy na **Azure** (inclusive o `mongo-init` da VM) e a leitura de `laudos` pelo
+> `backend-tutor-java` como aplicação (só o usuário `kura_java`, por `mongosh`).
+>
+> **Runbook (1 linha):** se o log do `kura-api` tiver o aviso `Mongo: schema…`, o runner rodou antes de o
+> `mongo-init` criar o usuário `kura_dotnet` (ambiente novo; o `kura-api` não depende do `mongo-init` de
+> propósito) — rode `docker compose restart kura-api` (fonte: `s4-net-g4.md`, nota n-1).
 
 ### Paginação, ordenação, filtros e HATEOAS
 
@@ -282,6 +292,11 @@ KURA_ATUALIZAR_OPENAPI=1 dotnet test tests/Kura.IntegrationTests --filter "Fully
 ```
 
 (Para o teste poder baixar o JSON, o Swagger também é exposto no ambiente `Testing`.)
+
+Parâmetros de query saem no OpenAPI em **camelCase** (`page`, `pageSize`, `sort`, `nome`…), iguais aos
+`_links` (o binding aceita qualquer caixa: `?Page=2` e `?page=2` são equivalentes). Os uploads
+`multipart/form-data` (laudos e foto do pet) têm o `requestBody` documentado por
+`[DocumentaMultipart]`, só na documentação — o binding do endpoint não muda.
 
 ---
 
@@ -691,13 +706,15 @@ arquivos unitários não precisaram ser anotados um a um, e é por isso que uma 
 2. **Infraestrutura** (`Kura.Infrastructure.Tests`): repositórios e políticas de persistência em EF
    InMemory e, para os **laudos, contra um `mongod` 8.0 embarcado (Mongo2Go 5.0.0)** — repositório
    concreto, `$jsonSchema` recusando documento inválido, índices criados e isolamento entre duas clínicas.
-   É o **8.0**, não o 7.0 do compose/Azure. Esta camada não usa Docker nem Oracle.
+   É o **8.0**; o 7.0.45 do compose foi exercitado à parte pelo G4 (ver
+   [MongoDB — laudos](#mongodb--laudos)). Esta camada não usa Docker nem Oracle.
 3. **Integração HTTP** (`Kura.IntegrationTests`): sobe o `Program.cs` real com `KuraApiFactory`
    (persistência trocada por EF InMemory e **fakes** de Mongo e storage) e prova rota, autorização,
    escopo de clínica, paginação, `_links`, `503` com Mongo fora — mais o `OpenApiDocumentoTests`.
 
-O que **nenhuma** camada prova: Oracle real, Mongo 7.0 e o deploy na Azure (ver os avisos
-**NÃO VERIFICADO** das seções acima).
+O que **nenhuma** camada automatizada prova: Oracle real, Mongo 7.0 e o deploy na Azure. Oracle real e
+Mongo 7.0.45 foram medidos **no compose local** pelo G4 (29/10/2026, `s4-net-g4.md`) — não são testes do
+repositório; a **Azure** continua **NÃO VERIFICADA** (ver o aviso em [MongoDB — laudos](#mongodb--laudos)).
 
 | Projeto | Recorte | O que cobre |
 |---|---|---|
