@@ -55,6 +55,15 @@ public class AgendamentoEventosRecepcaoHttpTests : IClassFixture<KuraApiFactoryR
 
     private DateTime AgoraSp() => _factory.AgoraSp();
 
+    /// <summary>
+    /// S4-NET-FIX-MEIANOITE: instante "cedo HOJE" (00h<c>minuto</c>, hora de SP), SEMPRE no mesmo dia
+    /// do relógio do host e sempre no passado enquanto o relógio passar de 00h<c>minuto</c>. Semear
+    /// <c>AgoraSp().AddMinutes(-30)</c> caía em ONTEM entre 00h00 e 00h30 e o service recusava o
+    /// check-in/início com 422 (guarda "só no dia do agendamento"). Os testes de comportamento geral
+    /// usam estes instantes; só os de virada do dia posicionam o relógio de propósito.
+    /// </summary>
+    private DateTime CedoHoje(int minuto) => AgoraSp().Date.AddMinutes(minuto);
+
     private async Task SemearAgendamentoAsync(
         long id,
         string status,
@@ -72,7 +81,7 @@ public class AgendamentoEventosRecepcaoHttpTests : IClassFixture<KuraApiFactoryR
             Id = id,
             IdClinica = idClinica,
             IdVeterinario = KuraApiFactory.IdVeterinarioSemeado,
-            DtAgendamento = dtAgendamento ?? AgoraSp().AddMinutes(-30),
+            DtAgendamento = dtAgendamento ?? CedoHoje(2),
             NrDuracaoMinutos = 30,
             DsTipoConsulta = "CONSULTA",
             StStatus = status,
@@ -274,7 +283,7 @@ public class AgendamentoEventosRecepcaoHttpTests : IClassFixture<KuraApiFactoryR
     {
         // Arrange -- fluxo normal: check-in já registrado, agora inicia o atendimento.
         const long id = 9213;
-        var checkin = AgoraSp().AddMinutes(-10);
+        var checkin = CedoHoje(6);
         await SemearAgendamentoAsync(id, "CONFIRMADO", nrVersion: 1, dtCheckin: checkin);
         var client = await ClienteAutenticadoAsync();
 
@@ -363,7 +372,7 @@ public class AgendamentoEventosRecepcaoHttpTests : IClassFixture<KuraApiFactoryR
     {
         // Arrange -- agendamento marcado para 30 minutos atrás: já passou da hora.
         const long id = 9222;
-        await SemearAgendamentoAsync(id, "AGENDADO", nrVersion: 0, dtAgendamento: AgoraSp().AddMinutes(-30));
+        await SemearAgendamentoAsync(id, "AGENDADO", nrVersion: 0, dtAgendamento: CedoHoje(2));
         var client = await ClienteAutenticadoAsync();
 
         // Act
@@ -381,8 +390,8 @@ public class AgendamentoEventosRecepcaoHttpTests : IClassFixture<KuraApiFactoryR
         const long id = 9223;
         await SemearAgendamentoAsync(
             id, "AGENDADO", nrVersion: 0,
-            dtAgendamento: AgoraSp().AddMinutes(-30),
-            dtCheckin: AgoraSp().AddMinutes(-25));
+            dtAgendamento: CedoHoje(2),
+            dtCheckin: CedoHoje(5));
         var client = await ClienteAutenticadoAsync();
 
         // Act
