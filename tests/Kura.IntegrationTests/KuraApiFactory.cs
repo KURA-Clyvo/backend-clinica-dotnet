@@ -191,6 +191,13 @@ public class KuraApiFactory : WebApplicationFactory<Program>
     // diferentes ficam isoladas.
     private readonly string _nomeBancoInMemory = $"kura-integration-{Guid.NewGuid():N}";
 
+    /// <summary>
+    /// S4-NET-FIX-MEIANOITE: relógio do host. <c>null</c> (padrão) mantém o
+    /// <c>TimeProvider.System</c> de produção; classes que dependem da guarda "é hoje" do
+    /// <c>AgendaService</c> usam <see cref="KuraApiFactoryRelogioFixo"/>, que sobrescreve isto.
+    /// </summary>
+    protected virtual TimeProvider? ProvedorDeTempo => null;
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         // (a) — ver documentação da classe. Não remover.
@@ -216,6 +223,13 @@ public class KuraApiFactory : WebApplicationFactory<Program>
 
         builder.ConfigureServices(services =>
         {
+            if (ProvedorDeTempo is { } provedor)
+            {
+                foreach (var d in services.Where(d => d.ServiceType == typeof(TimeProvider)).ToList())
+                    services.Remove(d);
+                services.AddSingleton(provedor);
+            }
+
             // Remove TODO registro ligado ao KuraDbContext feito por AddInfrastructure
             // (o provider Oracle inclusive). O predicado por argumento genérico pega
             // também IDbContextOptionsConfiguration<KuraDbContext>, introduzido no EF 9 —
