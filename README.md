@@ -6,16 +6,43 @@
 ![Azure](https://img.shields.io/badge/Azure-VM%20Linux-0078D4?logo=microsoftazure&logoColor=white)
 ![xUnit](https://img.shields.io/badge/Testes-xUnit%20%2B%20Moq-green)
 [![CI](https://github.com/KURA-Clyvo/backend-clinica-dotnet/actions/workflows/ci.yml/badge.svg)](https://github.com/KURA-Clyvo/backend-clinica-dotnet/actions/workflows/ci.yml)
-![Health](https://img.shields.io/badge/Health%20Checks-self%20%C2%B7%20oracle%20%C2%B7%20luna-informational)
+![Health](https://img.shields.io/badge/Health%20Checks-self%20%C2%B7%20oracle%20%C2%B7%20luna%20%C2%B7%20mongo-informational)
+![MongoDB](https://img.shields.io/badge/MongoDB-laudos%20(kura__docs)-47A248?logo=mongodb&logoColor=white)
 ![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-tracing%20%2B%20m%C3%A9tricas%20(Console)-blueviolet)
 
 Hub clínico do ecossistema **Clyvo Vet** — sistema integrado de gestão veterinária desenvolvido como Challenge FIAP 2026. Expõe a API RESTful responsável pelo domínio clínico: prontuários, eventos, agenda, IoT de temperatura e integração com a IA Luna de triagem.
 
 ---
 
+## Mapa da rubrica
+
+Cada item avaliável da disciplina, **onde está no código** e **onde está neste README**. Os caminhos
+foram conferidos com `ls`/`grep` na revisão que escreveu esta tabela (2026-10-28).
+
+| Item da rubrica | Onde está no código | Onde está no README |
+|---|---|---|
+| Clean Architecture (camadas) | `src/Kura.Domain` · `src/Kura.Application` · `src/Kura.Infrastructure` · `src/Kura.Api` · `src/Kura.CrossCutting` | [Arquitetura](#arquitetura) |
+| SOLID · injeção de dependência | Interfaces em `src/Kura.Domain/Interfaces/` e `src/Kura.Application/Services/Interfaces/`; registro em `src/Kura.Api/Extensions/ServiceCollectionExtensions.cs` (`AddApplication`, `AddInfrastructure`) | [Padrões arquiteturais](#padrões-arquiteturais-relevantes) |
+| Tratamento global de exceções | `src/Kura.Api/Middlewares/ExceptionHandlerMiddleware.cs` · `src/Kura.Domain/Exceptions/` | [Padrões arquiteturais](#padrões-arquiteturais-relevantes) |
+| Swagger / OpenAPI | `AddSwaggerGen` em `src/Kura.Api/Program.cs` · export em `docs/openapi.json` · teste `tests/Kura.IntegrationTests/OpenApiDocumentoTests.cs` | [Swagger exportado](#swagger-exportado-docsopenapijson) |
+| Paginação, ordenação e filtros | `src/Kura.Api/Paginacao/ConsultaPaginada.cs` · `src/Kura.Domain/Paginacao/` · `PetsV2Controller`, `TutoresV2Controller`, `AgendamentosV2Controller`, `LaudosController` | [Paginação, ordenação, filtros e HATEOAS](#paginação-ordenação-filtros-e-hateoas) |
+| HATEOAS | `src/Kura.Api/Hal/` (`HalLinkFactory`, `ListasV2Hal`, `LaudoHalDto`) | [Paginação, ordenação, filtros e HATEOAS](#paginação-ordenação-filtros-e-hateoas) |
+| JWT / autenticação e autorização | `src/Kura.Api/Program.cs` (`AddJwtBearer`) · `src/Kura.Application/Services/AuthService.cs` · `src/Kura.Api/Extensions/AuthorizationExtensions.cs` | [Autenticação](#autenticação) |
+| EF Core com migrações | `src/Kura.Infrastructure/Persistence/KuraDbContext.cs` · `src/Kura.Infrastructure/Migrations/` · `src/Kura.Api/Extensions/MigrationEvidenceExtensions.cs` | [Por que o DDL é Flyway](#por-que-o-ddl-é-flyway-e-o-que-são-as-migrations-ef) |
+| MongoDB | `src/Kura.Infrastructure/Mongo/` · `src/Kura.Api/Controllers/LaudosController.cs` | [MongoDB — laudos](#mongodb--laudos) |
+| Repository (+ Unit of Work) | `src/Kura.Domain/Interfaces/` · `src/Kura.Infrastructure/Persistence/Repositories/` · `src/Kura.Infrastructure/Mongo/LaudoRepository.cs` | [Padrões arquiteturais](#padrões-arquiteturais-relevantes) |
+| Health checks | `src/Kura.Api/Extensions/HealthCheckExtensions.cs` · `src/Kura.Api/HealthChecks/` (`LunaHealthCheck`, `MongoHealthCheck`) | [Health Checks](#health-checks-observabilidade-e-monitoramento) |
+| Logging estruturado | Serilog (console + arquivo `logs/kura-api-.log`) em `src/Kura.Api/Program.cs` · `src/Kura.Api/Extensions/RedigirRequestPathEnricher.cs` | [Observabilidade](#health-checks-observabilidade-e-monitoramento) |
+| Testes xUnit (AAA), unitários e de integração | `tests/Kura.Domain.Tests` · `tests/Kura.Application.Tests` · `tests/Kura.Infrastructure.Tests` · `tests/Kura.IntegrationTests` | [Testes](#testes) |
+| Cobertura de Domínio e Aplicação | `coverlet.collector` nos projetos de teste | [Cobertura](#cobertura-de-domínio-e-aplicação) |
+| Endpoints documentados | `docs/openapi.json` + tabelas | [Índice de Endpoints](#índice-de-endpoints) |
+| Integrantes | — | [Equipe](#equipe) |
+
+---
+
 ## Sumário
 
-1. [Arquitetura](#arquitetura)
+1. [Arquitetura](#arquitetura) — inclui [DDL × migrations EF](#por-que-o-ddl-é-flyway-e-o-que-são-as-migrations-ef), [MongoDB](#mongodb--laudos), [paginação/HATEOAS](#paginação-ordenação-filtros-e-hateoas) e [Swagger exportado](#swagger-exportado-docsopenapijson)
 2. [Primeiros Passos](#primeiros-passos)
 3. [Configuração de Ambiente](#configuração-de-ambiente)
 4. [Execução Local](#execução-local)
@@ -42,14 +69,25 @@ Api  ──►  Application  ──►  Domain
 
 ```mermaid
 graph TD
-    A[Kura.Api] --> B[Kura.Application]
-    A --> C[Kura.Infrastructure]
-    B --> D[Kura.Domain]
-    C --> D
-    B --> F[Kura.CrossCutting]
-    C --> F
-    C --> E[(Oracle 19c — FIAP)]
+    APP["Apps (mobile-clinica-rn, web da clínica)"] -->|HTTP + JWT| API[Kura.Api]
+    LUNA["Luna (IA de triagem, Python)"] -->|HTTP + X-Api-Key| API
+    API --> APPL[Kura.Application]
+    API --> INFRA[Kura.Infrastructure]
+    APPL --> DOM[Kura.Domain]
+    INFRA --> DOM
+    APPL --> CC[Kura.CrossCutting]
+    INFRA --> CC
+    INFRA -->|"EF Core (sem DDL)"| ORA[("Oracle — schema compartilhado")]
+    INFRA -->|"MongoDB.Driver"| MONGO[("MongoDB kura_docs.laudos")]
+    INFRA -->|"Storage:BasePath"| FS[("Storage de arquivos — PDFs e imagens")]
+    FLY["Flyway do backend-tutor-java — autoridade de DDL"] -.->|cria e altera as tabelas| ORA
+    JAVA["backend-tutor-java (leitor previsto)"] -.->|leitura prevista| MONGO
+    API -->|"GET /health"| LUNA
 ```
+
+Setas cheias = dependência/chamada deste backend. Setas pontilhadas = o que **outro** componente faz
+(o Flyway aplica o DDL do Oracle; o Java é o **leitor previsto** da coleção `laudos`, cuja dona é este backend). Oracle,
+Mongo e storage são dependências da camada **Infrastructure**; o Domain não conhece nenhuma delas.
 
 | Camada | Responsabilidade |
 |---|---|
@@ -67,6 +105,183 @@ graph TD
 - **Bool → CHAR(1)** — conversor global `BoolToSimNaoConverter` mapeia `bool`/`bool?` para `'S'`/`'N'` (schema Oracle).
 - **Read-only via interceptor** — `ReadOnlyTablesInterceptor` rejeita qualquer `Add`/`Update`/`Delete` contra `ContaTutor` e `Consentimento` (domínio Java).
 - **Concorrência otimista** — `Agendamento` usa coluna `NrVersion`; conflito retorna HTTP 409.
+
+
+### Por que o DDL é Flyway (e o que são as migrations EF)
+
+O schema Oracle é **compartilhado** com o `backend-tutor-java`, e **quem cria e altera as tabelas é o
+Flyway do Java** (`backend-tutor-java`, pastas `db/migration*`). Este backend **não aplica DDL**: o
+`Program.cs` nunca chama `Database.Migrate()` nem `EnsureCreated()` (regra em
+[`src/Kura.Infrastructure/MIGRATIONS_POLICY.md`](src/Kura.Infrastructure/MIGRATIONS_POLICY.md)).
+
+As migrations EF Core em [`src/Kura.Infrastructure/Migrations/`](src/Kura.Infrastructure/Migrations/)
+(17 migrations + `KuraDbContextModelSnapshot.cs`) são o **histórico do modelo EF** — geradas com
+`dotnet ef migrations add` e commitadas — e a **evidência de "migrações aplicadas"** da rubrica. O que
+o código faz com elas, com precisão
+([`MigrationEvidenceExtensions.cs`](src/Kura.Api/Extensions/MigrationEvidenceExtensions.cs)):
+
+- No startup, **fora do ambiente `Testing`**, o `Program.cs` consulta `GetPendingMigrationsAsync()` e,
+  se houver migration EF pendente, **só registra um `WARN`** — não aplica nada.
+- A verificação tenta até **5 vezes** (espera exponencial 1 s, 2 s, 4 s, 8 s) e, esgotadas as tentativas,
+  **segue com a subida**: ela **nunca lança**. Banco fora do ar é reportado por `GET /health`, não por
+  um processo que morre.
+- O SQL de cada migration pode ser extraído com `dotnet ef migrations script` para `migrations-sql/` e
+  entregue a quem mantém o Flyway.
+
+**Por que não trocar a autoridade:** duas ferramentas de DDL no mesmo schema já quebraram este projeto —
+o EF declarava `HasDefaultValueSql("SEQ_x.NEXTVAL")` em tabelas cujas sequences o Flyway não criava e
+todo `INSERT` do .NET falhava com `ORA-02289` num Oracle criado só pelo Flyway. Foi resolvido
+**concentrando o DDL no Flyway** (a migration `V12` do Java criou as sequences). Manter o EF como gerador
+de evidência, e o Flyway como único executor, evita que as duas ferramentas voltem a divergir.
+
+> O Oracle **não** é exercitado pela suíte automatizada deste repositório (EF InMemory e fakes).
+> `LIKE ... ESCAPE`, `OFFSET/FETCH` e `LongCount` das listas v2 foram provados só no SQL **gerado**; a
+> execução contra Oracle real está **NÃO VERIFICADA** neste README.
+
+### MongoDB — laudos
+
+**Por que documento.** Um laudo tem **campos que variam por tipo** (`HEMOGRAMA`, `BIOQUIMICO`,
+`IMAGEM`, `RECEITA`, `OUTRO`): hematócrito e leucócitos num, achados de imagem em outro. Em Oracle isso
+viraria uma tabela larga cheia de colunas nulas ou um modelo EAV; em documento, o que é comum fica em
+campos fixos e o que varia fica em `dados`, sem migration a cada tipo novo.
+**Onde documento NÃO vale** (e por isso o resto continua em Oracle): prontuário, agenda, cobrança e
+cadastro são relacionais, com integridade referencial, joins e transações entre tabelas — nada disso é
+ganho no Mongo.
+
+**Divisão de responsabilidades.** O **binário** (PDF/JPEG/PNG/WebP, até **10 MiB**, aceito pela
+**assinatura** dos primeiros bytes, nunca pela extensão) fica no storage de arquivos
+(`Storage:BasePath`, chave `clinica/{idClinica}/pet/{idPet}/laudo/{guid}.{ext}`); o Mongo guarda os
+**metadados** e o `sha256` do arquivo. A coleção é **do .NET**; o contrato prevê que o `backend-tutor-java` apenas **leia** (essa leitura é de outra frente e **não foi verificada** aqui).
+
+**Contrato da coleção** `kura_docs.laudos` (fonte: `src/Kura.Infrastructure/Mongo/schema/laudos.schema.json`):
+
+| Campo | Tipo BSON | Obrigatório | Regra |
+|---|---|---|---|
+| `_id` | ObjectId | sim | — |
+| `idClinica` · `idPet` · `idUsuarioAutor` | long | sim | escopo e autoria |
+| `idEventoClinico` | long ou null | não | vínculo opcional com o prontuário Oracle |
+| `tipo` | enum | sim | `HEMOGRAMA` `BIOQUIMICO` `IMAGEM` `RECEITA` `OUTRO` |
+| `titulo` | string 1..120 | sim | — |
+| `dataExame` | date (UTC) | sim | — |
+| `laboratorio` · `observacao` | string ou null | não | até 120 · até 1000 caracteres |
+| `dados` | object | sim (pode ser `{}`) | campos variáveis por tipo |
+| `arquivo` | object | sim | `chave`, `contentType` (enum de 4), `tamanhoBytes`, `sha256` (`^[0-9a-f]{64}$`) |
+| `stAtivo` · `criadoEm` · `atualizadoEm` | bool · date · date | sim | exclusão **lógica** |
+| `removidoEm` | date ou null | não | preenchido na exclusão lógica |
+
+O `$jsonSchema` é aplicado com `validationLevel: strict` e `validationAction: error`, com
+`additionalProperties: false` na raiz e em `arquivo`. Os **3 índices**
+(`src/Kura.Infrastructure/Mongo/schema/laudos.indexes.json`) e a consulta que cada um serve:
+
+| Índice | Chave | Consulta |
+|---|---|---|
+| `ix_laudo_clinica_pet_ativo_data` | `idClinica, idPet, stAtivo, dataExame↓, _id↓` | lista de laudos do pet na clínica, sem filtro de tipo |
+| `ix_laudo_clinica_pet_ativo_tipo_data` | `idClinica, idPet, stAtivo, tipo, dataExame↓, _id↓` | a mesma lista, com `tipo=` |
+| `ix_laudo_pet_ativo_data` | `idPet, stAtivo, dataExame↓` | leitura por pet sem clínica (prevista para o lado Java) |
+
+**Escopo obrigatório por clínica.** Todo método de `ILaudoRepository` exige `long idClinica`, e o filtro
+de toda leitura/escrita começa por ele e por `stAtivo=true`; não existe `DeleteOne` (exclusão é lógica).
+O teste de reflexão `LaudoRepositoryEscopoTests` quebra se alguém acrescentar um método sem `idClinica`
+(o equivalente Mongo do `TenantFilterCoverageTests`).
+
+**Runner idempotente.** `MongoSchemaRunner` (`IHostedService`) cria a coleção ou aplica `collMod`, e
+cria os índices; rodar de novo não duplica nada. Ele **captura toda exceção** (1 `WARN`, sem URI nem
+credencial) e **nunca derruba o processo**. Não roda com `Mongo__InitEnabled=false` nem sem connection
+string.
+
+**Mongo fora do ar não derruba a API.** `GET /health` devolve o check `mongo` como `Degraded` (HTTP 200),
+nunca `Unhealthy`; as rotas de laudo devolvem `503` com `codigo=LAUDOS_INDISPONIVEL`. Sem
+`Mongo__ConnectionString` a API sobe normalmente e laudos ficam indisponíveis.
+
+Configuração: `Mongo__ConnectionString` (vazia = não configurado), `Mongo__Database` (padrão
+`kura_docs`), `Mongo__InitEnabled` (padrão `true`), `Mongo__ServerSelectionTimeoutSeconds` (padrão e
+teto: 3).
+
+> **Versões — leia antes de citar.** Os testes do repositório e do runner rodam contra um **mongod 8.0.26
+> embarcado (Mongo2Go 5.0.0)**, não contra o Mongo do compose/Azure (**7.0.x**). A equivalência de
+> `$jsonSchema` e índices entre 8.0 e 7.0 está **NÃO VERIFICADA** neste README. O deploy dos laudos na
+> Azure também está **NÃO VERIFICADO**.
+
+### Paginação, ordenação, filtros e HATEOAS
+
+**Parâmetros comuns** (`ConsultaPaginada`): `page` (≥ 1, padrão 1), `pageSize` (1 a 100, padrão 20) e
+`sort` (lista branca por recurso; prefixo `-` = decrescente). Valor inválido devolve **400** de validação,
+nunca 500. O `sort` nunca chega ao banco como texto livre: é mapeado para um enum fechado.
+
+| Recurso | Rota | `sort` permitido (o padrão é o primeiro) | Filtros |
+|---|---|---|---|
+| Pets | `GET /api/v2/pets` | `nome`, `-nome`, `dtNascimento`, `-dtNascimento`, `id`, `-id` | `nome` (contém), `tutorId`, `especieId`, `porte` (P/M/G) |
+| Tutores | `GET /api/v2/tutores` | `nome`, `-nome`, `id`, `-id` | `busca` (nome ou CPF parcial) |
+| Agendamentos | `GET /api/v2/agendamentos` | `dtAgendamento`, `-dtAgendamento`, `id`, `-id` | `dataInicio` e `dataFim` (**obrigatórios**, até 31 dias), `veterinarioId`, `status` |
+| Laudos do pet | `GET /api/v1/pets/{idPet}/laudos` | `-dataExame`, `dataExame`, `criadoEm`, `-criadoEm` | `tipo`, `de`, `ate` (ISO-8601) |
+
+**Envelope HAL.** Lista: `items`, `page`, `pageSize`, `total`, `totalPages` e `_links`
+(`self`, `first`, `last`, e `prev`/`next` só quando existem; todos preservam filtros e ordenação). Com
+`total = 0`, o envelope traz só `self` e `first`. Cada item tem o próprio `_links`. Os hrefs saem do
+`LinkGenerator` a partir do **nome da rota** — nenhum é escrito à mão — e vivem só na camada Api.
+Exemplo real de uma execução do host de teste (`GET /api/v1/pets/1/laudos?pageSize=2&sort=dataExame`,
+token de GESTOR; o array real tem 2 itens, mostrado 1):
+
+```json
+{
+  "items": [
+    {
+      "_links": {
+        "self": { "href": "/api/v1/laudos/000000000000000000000001" },
+        "pet": { "href": "/api/v1/pets/1" },
+        "laudosDoPet": { "href": "/api/v1/pets/1/laudos" },
+        "arquivo": { "href": "/api/v1/laudos/000000000000000000000001/arquivo" },
+        "excluir": { "href": "/api/v1/laudos/000000000000000000000001", "method": "DELETE" }
+      },
+      "id": "000000000000000000000001", "idPet": 1, "tipo": "HEMOGRAMA", "titulo": "Laudo 1",
+      "dataExame": "2026-09-01T00:00:00Z", "dados": { "hematocrito": 42.5 },
+      "arquivo": { "contentType": "application/pdf", "tamanhoBytes": 10, "sha256": "fc0222…e003" }
+    }
+  ],
+  "page": 1, "pageSize": 2, "total": 3, "totalPages": 2,
+  "_links": {
+    "self":  { "href": "/api/v1/pets/1/laudos?sort=dataExame&page=1&pageSize=2" },
+    "first": { "href": "/api/v1/pets/1/laudos?sort=dataExame&page=1&pageSize=2" },
+    "last":  { "href": "/api/v1/pets/1/laudos?sort=dataExame&page=2&pageSize=2" },
+    "next":  { "href": "/api/v1/pets/1/laudos?sort=dataExame&page=2&pageSize=2" }
+  }
+}
+```
+
+(Os campos `idEventoClinico`, `laboratorio`, `observacao`, `criadoEm` e `atualizadoEm` foram omitidos do
+exemplo; os ids são os do fake em memória do teste — em produção são ObjectId de 24 hex.)
+
+**Ações por papel.** O mesmo `GET` devolve `_links` diferentes conforme o papel: o link `excluir` do laudo
+só aparece para `GESTOR` — a decisão usa a **mesma política** (`SomenteGestor`) que protege o `DELETE`,
+então o link e o `403` não divergem. `GESTOR` e `VETERINARIO` enviam laudo. Nas listas v2, as ações de
+recepção do agendamento (`checkin`, `inicio-atendimento`, `status`) só aparecem quando a regra do
+`AgendaService` as admite para o estado atual.
+
+**Por que as listas paginadas estão em `/api/v2`.** `GET /api/v1/pets` e `GET /api/v1/tutores` devolvem
+**array puro**, e o app da clínica publicado lê exatamente esse formato. Trocar o shape da v1 para um
+envelope paginado quebraria o app em produção sem nenhum teste deste repositório avisar. Por isso
+paginação, ordenação, filtros e HAL de pets, tutores e agendamentos nasceram em **`/api/v2`**, com a v1
+intacta (versionamento por rota para evoluir o contrato sem quebrar clientes). Laudos nasceram direto em
+`/api/v1`, já paginados, porque não tinham consumidor anterior.
+
+> **Declarado:** a busca por CPF parcial em `busca` volta nos links de navegação (senão a página 2
+> deixaria de ser a da mesma busca). Em teste, a instrumentação do OpenTelemetry 1.18 redigiu `url.query`
+> e o log de requisição do Serilog não registrou CPF; **não** foi verificado com um coletor real.
+
+### Swagger exportado (`docs/openapi.json`)
+
+A documentação dos endpoints está **exportada** em [`docs/openapi.json`](docs/openapi.json) (OpenAPI do
+Swashbuckle, gerado **da aplicação**, nunca à mão) e disponível ao vivo em `/swagger` no ambiente
+`Development`. O arquivo **não envelhece**: o teste
+[`OpenApiDocumentoTests`](tests/Kura.IntegrationTests/OpenApiDocumentoTests.cs) sobe o `Program.cs`
+real, baixa `/swagger/v1/swagger.json` e o compara com o arquivo versionado — rota nova, parâmetro novo ou
+`summary` alterado sem regenerar derruba a suíte, com o comando na mensagem. Para regenerar:
+
+```bash
+KURA_ATUALIZAR_OPENAPI=1 dotnet test tests/Kura.IntegrationTests --filter "FullyQualifiedName~OpenApiDocumentoTests"
+```
+
+(Para o teste poder baixar o JSON, o Swagger também é exposto no ambiente `Testing`.)
 
 ---
 
