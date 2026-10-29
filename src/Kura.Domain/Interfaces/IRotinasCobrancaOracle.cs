@@ -6,7 +6,7 @@ namespace Kura.Domain.Interfaces;
 /// Infrastructure não referencia a Application.
 ///
 /// <para>🔴 Toda operação recebe <c>long idClinica</c> — sem sobrecarga sem escopo — e
-/// <c>EXPORTAR_TODAS</c> (todas as clínicas) <b>não existe nesta interface</b>, de propósito.
+/// a rotina de exportação de TODAS as clínicas <b>não existe nesta interface</b>, de propósito.
 /// Falhas chegam como <see cref="Exceptions.EntidadeNaoEncontradaException"/> (clínica
 /// inexistente), <see cref="Exceptions.RotinaOracleIndisponivelException"/> ou
 /// <see cref="Exceptions.RotinaOracleFalhouException"/>; nunca como exceção do driver.</para>
