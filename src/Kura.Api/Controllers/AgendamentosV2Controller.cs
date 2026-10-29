@@ -13,15 +13,19 @@ using Microsoft.AspNetCore.Mvc;
 public sealed class AgendamentoListaQuery : ConsultaPaginada
 {
     /// <summary>Início do intervalo (ISO-8601, inclusivo, por dia). Obrigatório.</summary>
+    [FromQuery(Name = "dataInicio")]
     public DateTime? DataInicio { get; set; }
 
     /// <summary>Fim do intervalo (ISO-8601, inclusivo, por dia; no máximo 31 dias após o início). Obrigatório.</summary>
+    [FromQuery(Name = "dataFim")]
     public DateTime? DataFim { get; set; }
 
     /// <summary>Somente agendamentos deste veterinário.</summary>
+    [FromQuery(Name = "veterinarioId")]
     public long? VeterinarioId { get; set; }
 
     /// <summary>Status: INTENCAO, AGENDADO, CONFIRMADO, REALIZADO, CANCELADO ou NAO_COMPARECEU.</summary>
+    [FromQuery(Name = "status")]
     public string? Status { get; set; }
 }
 

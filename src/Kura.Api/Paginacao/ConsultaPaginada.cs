@@ -1,6 +1,7 @@
 namespace Kura.Api.Paginacao;
 
 using System.ComponentModel.DataAnnotations;
+using Microsoft.AspNetCore.Mvc;
 
 /// <summary>
 /// Parâmetros comuns de listas paginadas (S4-NET-03; reaproveitados pela S4-NET-04).
@@ -17,13 +18,16 @@ public class ConsultaPaginada
 
     /// <summary>Página, base 1.</summary>
     [Range(1, PaginaMaxima, ErrorMessage = "'page' deve estar entre 1 e 1000000.")]
+    [FromQuery(Name = "page")]
     public int Page { get; set; } = 1;
 
     /// <summary>Itens por página (1 a 100).</summary>
     [Range(1, TamanhoPaginaMaximo, ErrorMessage = "'pageSize' deve estar entre 1 e 100.")]
+    [FromQuery(Name = "pageSize")]
     public int PageSize { get; set; } = TamanhoPaginaPadrao;
 
     /// <summary>Ordenação; valores aceitos dependem do recurso. Prefixo <c>-</c> = decrescente.</summary>
+    [FromQuery(Name = "sort")]
     public string? Sort { get; set; }
 }
 

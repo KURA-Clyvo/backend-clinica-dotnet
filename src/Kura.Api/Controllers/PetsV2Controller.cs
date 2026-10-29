@@ -11,15 +11,19 @@ using Microsoft.AspNetCore.Mvc;
 public sealed class PetListaQuery : ConsultaPaginada
 {
     /// <summary>Nome do pet: contém, sem distinção de maiúsculas/minúsculas.</summary>
+    [FromQuery(Name = "nome")]
     public string? Nome { get; set; }
 
     /// <summary>Somente pets vinculados a este tutor.</summary>
+    [FromQuery(Name = "tutorId")]
     public long? TutorId { get; set; }
 
     /// <summary>Somente pets desta espécie.</summary>
+    [FromQuery(Name = "especieId")]
     public long? EspecieId { get; set; }
 
     /// <summary>Porte: P, M ou G.</summary>
+    [FromQuery(Name = "porte")]
     public string? Porte { get; set; }
 }
 

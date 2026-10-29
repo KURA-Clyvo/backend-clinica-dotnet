@@ -227,6 +227,7 @@ public class PetsController : ControllerBase
     [HttpPost("{id:long}/foto")]
     [RequestSizeLimit(2 * 1024 * 1024)]
     [DesabilitaFormValueProviders]
+    [DocumentaMultipart("thumb", "media")]
     [Consumes("multipart/form-data")]
     [ProducesResponseType(typeof(PetFotoResponseDto), 200)]
     [ProducesResponseType(400)]

@@ -58,9 +58,9 @@ public class OpenApiDocumentoTests : IClassFixture<KuraApiFactory>
         var paths = doc["paths"]!.AsObject();
 
         // Assert — as 3 listas v2 e a lista de laudos expõem page, pageSize, sort e o próprio filtro
-        ParametrosDe(paths, "/api/v2/pets", "get").Should().Contain(Nomes("page", "pageSize", "sort", "Nome", "TutorId", "EspecieId", "Porte"));
-        ParametrosDe(paths, "/api/v2/tutores", "get").Should().Contain(Nomes("page", "pageSize", "sort", "Busca"));
-        ParametrosDe(paths, "/api/v2/agendamentos", "get").Should().Contain(Nomes("page", "pageSize", "sort", "DataInicio", "DataFim", "VeterinarioId", "Status"));
+        ParametrosDe(paths, "/api/v2/pets", "get").Should().Contain(Nomes("page", "pageSize", "sort", "nome", "tutorId", "especieId", "porte"));
+        ParametrosDe(paths, "/api/v2/tutores", "get").Should().Contain(Nomes("page", "pageSize", "sort", "busca"));
+        ParametrosDe(paths, "/api/v2/agendamentos", "get").Should().Contain(Nomes("page", "pageSize", "sort", "dataInicio", "dataFim", "veterinarioId", "status"));
         ParametrosDe(paths, "/api/v1/pets/{idPet}/laudos", "get").Should().Contain(Nomes("page", "pageSize", "sort", "tipo", "de", "ate"));
 
         // respostas declaradas
@@ -71,12 +71,46 @@ public class OpenApiDocumentoTests : IClassFixture<KuraApiFactory>
         RespostasDe(paths, "/api/v1/laudos/{id}", "delete").Should().Contain(["204", "403", "404"]);
     }
 
+    [Fact]
+    public async Task Parametros_de_query_saem_em_camelCase_e_nenhum_em_PascalCase()
+    {
+        var doc = JsonNode.Parse(await BaixarSwaggerNormalizadoAsync())!;
+
+        var queryParams = doc["paths"]!.AsObject()
+            .SelectMany(p => p.Value!.AsObject().Where(v => v.Key is "get" or "post" or "put" or "delete")
+                .SelectMany(v => (v.Value!["parameters"]?.AsArray() ?? [])
+                    .Where(x => x!["in"]!.GetValue<string>() == "query")
+                    .Select(x => $"{v.Key.ToUpperInvariant()} {p.Key} :: {x!["name"]!.GetValue<string>()}")))
+            .ToList();
+
+        queryParams.Should().NotBeEmpty("controle positivo: o detector enxerga parâmetros de query");
+        queryParams.Where(q => char.IsUpper(q.Split(" :: ")[1][0])).Should().BeEmpty(
+            "nenhum parâmetro de query pode começar em maiúscula (G4-m-1)");
+    }
+
+    [Theory]
+    [InlineData("/api/v1/pets/{idPet}/laudos", "arquivo", new[] { "arquivo", "tipo", "titulo", "dataExame", "laboratorio", "observacao", "idEventoClinico", "dados" })]
+    [InlineData("/api/v1/pets/{id}/foto", "thumb", new[] { "thumb", "media" })]
+    public async Task Uploads_multipart_documentam_o_requestBody_com_parte_binaria(string rota, string parteBinaria, string[] partes)
+    {
+        var doc = JsonNode.Parse(await BaixarSwaggerNormalizadoAsync())!;
+
+        var corpo = doc["paths"]![rota]!["post"]!["requestBody"];
+
+        corpo.Should().NotBeNull($"POST {rota} não pode sair com requestBody null (G4-m-2)");
+        var schema = corpo!["content"]!["multipart/form-data"]!["schema"]!;
+        schema["properties"]![parteBinaria]!["type"]!.GetValue<string>().Should().Be("string");
+        schema["properties"]![parteBinaria]!["format"]!.GetValue<string>().Should().Be("binary");
+        schema["properties"]!.AsObject().Select(p => p.Key).Should().BeEquivalentTo(partes);
+        schema["required"]!.AsArray().Select(r => r!.GetValue<string>()).Should().Contain(parteBinaria);
+    }
+
     private static HashSet<string> ParametrosDe(JsonObject paths, string rota, string verbo)
     {
         var op = paths[rota]?[verbo]
             ?? throw new Xunit.Sdk.XunitException($"Operação {verbo.ToUpperInvariant()} {rota} ausente do OpenAPI.");
         var nomes = (op["parameters"]?.AsArray() ?? [])
-            .Select(p => Normalizar2(p!["name"]!.GetValue<string>()));
+            .Select(p => p!["name"]!.GetValue<string>());
         return nomes.ToHashSet();
     }
 
@@ -87,11 +121,9 @@ public class OpenApiDocumentoTests : IClassFixture<KuraApiFactory>
         return op["responses"]!.AsObject().Select(r => r.Key).ToHashSet();
     }
 
-    // O Swashbuckle publica os nomes dos parâmetros como o model binding os conhece; a comparação
-    // ignora a caixa para não depender de a convenção ser PascalCase (listas v2) ou camelCase.
-    private static string[] Nomes(params string[] nomes) => nomes.Select(Normalizar2).ToArray();
-
-    private static string Normalizar2(string nome) => nome.ToLowerInvariant();
+    // S4-NET-07 (G4-m-1): comparação EXATA (com caixa) — o OpenAPI tem de dizer os mesmos nomes
+    // camelCase que os `_links` e o README usam.
+    private static string[] Nomes(params string[] nomes) => nomes;
 
     private async Task<string> BaixarSwaggerNormalizadoAsync()
     {

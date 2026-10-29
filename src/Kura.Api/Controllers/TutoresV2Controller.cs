@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Mvc;
 public sealed class TutorListaQuery : ConsultaPaginada
 {
     /// <summary>Texto parcial de nome (sem caixa) ou de CPF — mesma semântica da v1.</summary>
+    [FromQuery(Name = "busca")]
     public string? Busca { get; set; }
 }
 
