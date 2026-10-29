@@ -1,5 +1,10 @@
 namespace Kura.Infrastructure.Tests;
 
+using System.Reflection;
+using System.Reflection.Emit;
+using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
+using System.Reflection.PortableExecutable;
 using System.Text;
 using FluentAssertions;
 
@@ -34,15 +39,57 @@ public class ExportarTodasGuardaTests
         return dir!.FullName;
     }
 
+    /// <summary>
+    /// Detector binário: (a) user strings do assembly via <c>MetadataReader.GetUserString</c>
+    /// (independe de alinhamento do heap #US) e (b) varredura crua em UTF-8 e UTF-16 a partir do
+    /// byte 0 <b>e</b> do byte 1 (UTF-16 em offset ímpar escapava da versão anterior).
+    /// </summary>
     private static bool ContemEmQualquerCaixa(byte[] bytes, string needle)
     {
         foreach (var enc in new Encoding[] { Encoding.UTF8, Encoding.Unicode })
         {
-            var texto = enc.GetString(bytes);
-            if (texto.Contains(needle, StringComparison.OrdinalIgnoreCase))
-                return true;
+            for (var inicio = 0; inicio < 2; inicio++)
+            {
+                var texto = enc.GetString(bytes, inicio, bytes.Length - inicio);
+                if (texto.Contains(needle, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
         }
-        return false;
+        return ContemEmUserString(bytes, needle);
+    }
+
+    private static bool ContemEmUserString(byte[] pe, string needle)
+    {
+        try
+        {
+            using var peReader = new PEReader(new MemoryStream(pe));
+            if (!peReader.HasMetadata)
+                return false;
+            var md = peReader.GetMetadataReader();
+            // O handle 0 do heap #US é a string vazia reservada; a enumeração começa no próximo.
+            for (var h = md.GetNextHandle(MetadataTokens.UserStringHandle(0)); !h.IsNil; h = md.GetNextHandle(h))
+            {
+                if (md.GetUserString(h).Contains(needle, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+        catch (BadImageFormatException)
+        {
+            return false; // bytes crus (controles) não são PE
+        }
+    }
+
+    /// <summary>Todos os assemblies de <c>src/</c> (um por projeto), achados pelo nome da pasta.</summary>
+    private static List<string> DllsDeSrc()
+    {
+        var src = Path.Combine(RaizDoRepo(), "src");
+        var nomes = Directory.GetDirectories(src).Select(d => Path.GetFileName(d)!).ToList();
+        nomes.Should().Contain("Kura.Api").And.Contain("Kura.Infrastructure");
+        return nomes
+            .Select(n => Path.Combine(AppContext.BaseDirectory, n + ".dll"))
+            .Where(File.Exists)
+            .ToList();
     }
 
     [Fact]
@@ -67,20 +114,15 @@ public class ExportarTodasGuardaTests
     [Fact]
     public void Nenhum_assembly_de_src_contem_o_nome_da_rotina()
     {
-        var assemblies = new[]
-        {
-            typeof(Kura.Infrastructure.RotinasOracle.RotinasCobrancaOracle).Assembly,
-            typeof(Kura.Application.Services.CobrancaOracleService).Assembly,
-            typeof(Kura.Domain.Interfaces.IRotinasCobrancaOracle).Assembly,
-            typeof(Kura.Api.Controllers.FinanceiroController).Assembly,
-        };
+        var dlls = DllsDeSrc();
+        dlls.Count.Should().Be(5, "os 5 projetos de src/ precisam ser escaneados (detector cego se faltar um)");
 
-        foreach (var asm in assemblies)
+        foreach (var dll in dlls)
         {
-            var bytes = File.ReadAllBytes(asm.Location);
+            var bytes = File.ReadAllBytes(dll);
             bytes.Length.Should().BeGreaterThan(1000);
             ContemEmQualquerCaixa(bytes, Proibida)
-                .Should().BeFalse($"{asm.GetName().Name} não pode referenciar a exportação de todas as clínicas");
+                .Should().BeFalse($"{Path.GetFileName(dll)} não pode referenciar a exportação de todas as clínicas");
         }
     }
 
@@ -90,5 +132,39 @@ public class ExportarTodasGuardaTests
         ContemEmQualquerCaixa(Encoding.UTF8.GetBytes("xx" + Proibida.ToLowerInvariant() + "yy"), Proibida).Should().BeTrue();
         ContemEmQualquerCaixa(Encoding.Unicode.GetBytes("xx" + Proibida + "yy"), Proibida).Should().BeTrue();
         ContemEmQualquerCaixa(Encoding.UTF8.GetBytes("PKG_COBRANCA.LISTAR_JSON"), Proibida).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void Controle_positivo_UTF16_em_offset_par_e_impar(int prefixo)
+    {
+        var bytes = new byte[prefixo].Concat(Encoding.Unicode.GetBytes(Proibida)).ToArray();
+        ContemEmQualquerCaixa(bytes, Proibida).Should().BeTrue($"UTF-16 começando no byte {prefixo}");
+    }
+
+    [Fact]
+    public void Controle_positivo_o_detector_enxerga_literal_ldstr_dentro_de_um_assembly_real()
+    {
+        // Assembly de verdade (PE + metadata) cujo método carrega o literal partido em duas
+        // partes e concatenado em IL — o ldstr grava cada parte no heap #US; as duas juntas só
+        // existem em tempo de execução, então a user string inteira também é testada abaixo.
+        byte[] Montar(string literal)
+        {
+            var ab = new PersistedAssemblyBuilder(new AssemblyName("ControleGuarda"), typeof(object).Assembly);
+            var mb = ab.DefineDynamicModule("ControleGuarda");
+            var tb = mb.DefineType("T", TypeAttributes.Public | TypeAttributes.Class);
+            var m = tb.DefineMethod("M", MethodAttributes.Public | MethodAttributes.Static, typeof(string), Type.EmptyTypes);
+            var il = m.GetILGenerator();
+            il.Emit(OpCodes.Ldstr, "padding-" + literal);
+            il.Emit(OpCodes.Ret);
+            tb.CreateType();
+            var ms = new MemoryStream();
+            ab.Save(ms);
+            return ms.ToArray();
+        }
+
+        ContemEmUserString(Montar(Proibida), Proibida).Should().BeTrue("o literal está no heap #US");
+        ContemEmUserString(Montar("outra_coisa"), Proibida).Should().BeFalse();
     }
 }
