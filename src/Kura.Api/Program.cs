@@ -216,7 +216,10 @@ if (!app.Environment.IsEnvironment("Testing"))
 // (ordem, não nível — ver comentário completo em RequestPipelineExtensions).
 app.UseRequestLoggingAndExceptionHandling();
 
-if (app.Environment.IsDevelopment())
+// S4-NET-06: "Testing" também expõe o Swagger, para que o teste de integração
+// OpenApiDocumentoTests baixe /swagger/v1/swagger.json e o compare com docs/openapi.json.
+// Só o JSON é consumido pelo teste; "Testing" nunca é o ambiente de produção.
+if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
 {
     app.UseSwagger();
     app.UseSwaggerUI();
