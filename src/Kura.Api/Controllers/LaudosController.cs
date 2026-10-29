@@ -19,12 +19,15 @@ using Microsoft.AspNetCore.Mvc;
 public sealed class LaudoListaQuery : ConsultaPaginada
 {
     /// <summary>Tipo do laudo: HEMOGRAMA, BIOQUIMICO, IMAGEM, RECEITA ou OUTRO.</summary>
+    [FromQuery(Name = "tipo")]
     public string? Tipo { get; set; }
 
     /// <summary>Início do período do exame (ISO-8601; sem offset = UTC). Inclusivo.</summary>
+    [FromQuery(Name = "de")]
     public string? De { get; set; }
 
     /// <summary>Fim do período do exame (ISO-8601; sem offset = UTC). Inclusivo; para o dia inteiro envie 23:59:59.</summary>
+    [FromQuery(Name = "ate")]
     public string? Ate { get; set; }
 }
 
@@ -103,6 +106,8 @@ public class LaudosController : ControllerBase
     [HttpPost("pets/{idPet:long}/laudos")]
     [RequestSizeLimit(LimiteCorpoUploadBytes)]
     [DesabilitaFormValueProviders]
+    [DocumentaMultipart("arquivo", CamposObrigatorios = ["tipo", "titulo", "dataExame"],
+        CamposOpcionais = ["laboratorio", "observacao", "idEventoClinico", "dados"])]
     [Consumes("multipart/form-data")]
     [ProducesResponseType(typeof(LaudoHalDto), 201)]
     [ProducesResponseType(typeof(ValidationProblemDetails), 400)]

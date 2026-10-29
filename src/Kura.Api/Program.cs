@@ -114,6 +114,8 @@ builder.Services.AddSwaggerGen(c =>
             new List<string>()
         }
     });
+    c.OperationFilter<Kura.Api.Filters.DocumentaMultipartOperationFilter>();
+    c.ParameterFilter<Kura.Api.Filters.QueryEmCamelCaseParameterFilter>();
     // XML comments
     var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
     var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);

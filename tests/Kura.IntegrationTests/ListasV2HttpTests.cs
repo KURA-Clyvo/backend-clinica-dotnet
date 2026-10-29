@@ -130,6 +130,29 @@ public class ListasV2HttpTests : IClassFixture<ListasV2Fixture>
         item.GetProperty("inativar").GetProperty("method").GetString().Should().Be("DELETE");
     }
 
+    /// <summary>
+    /// S4-NET-07 (G4-m-1) — o OpenAPI publica <c>page</c>/<c>pageSize</c>/<c>sort</c>/<c>nome</c> em camelCase
+    /// (<c>[FromQuery(Name=...)]</c>); o binding de query segue sem distinção de caixa, então quem usa a
+    /// grafia antiga (<c>Page</c>, <c>PageSize</c>, <c>Sort</c>, <c>Nome</c>) recebe a MESMA página.
+    /// </summary>
+    [Theory]
+    [InlineData("page=2&pageSize=2&sort=-nome&nome=v2")]
+    [InlineData("Page=2&PageSize=2&Sort=-nome&Nome=v2")]
+    public async Task Pets_Query_AceitaCamelCaseEPascalCase_ComOMesmoResultado(string query)
+    {
+        var vet = await _fx.ClienteAsync(KuraApiFactory.EmailClinica);
+
+        var r = await vet.GetAsync("/api/v2/pets?" + query);
+
+        r.StatusCode.Should().Be(HttpStatusCode.OK);
+        var corpo = await Json(r);
+        corpo.GetProperty("page").GetInt32().Should().Be(2, "'page' foi lido, não ignorado");
+        corpo.GetProperty("pageSize").GetInt32().Should().Be(2);
+        corpo.GetProperty("total").GetInt64().Should().Be(3, "'nome' foi lido: o pet da clínica B e os demais não entram");
+        corpo.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("nmPet").GetString())
+            .Should().Equal("V2 Mia");
+    }
+
     [Fact]
     public async Task Pets_Ordenacao_DescEFiltrosCombinados()
     {
