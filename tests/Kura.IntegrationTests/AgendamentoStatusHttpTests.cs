@@ -40,11 +40,11 @@ using Microsoft.Extensions.DependencyInjection;
 /// </para>
 /// </summary>
 [Trait(ConvencaoDeTestes.Categoria, ConvencaoDeTestes.Integracao)]
-public class AgendamentoStatusHttpTests : IClassFixture<KuraApiFactory>
+public class AgendamentoStatusHttpTests : IClassFixture<KuraApiFactoryRelogioFixo>
 {
-    private readonly KuraApiFactory _factory;
+    private readonly KuraApiFactoryRelogioFixo _factory;
 
-    public AgendamentoStatusHttpTests(KuraApiFactory factory) => _factory = factory;
+    public AgendamentoStatusHttpTests(KuraApiFactoryRelogioFixo factory) => _factory = factory;
 
     private async Task<HttpClient> ClienteAutenticadoAsync()
     {
@@ -61,11 +61,7 @@ public class AgendamentoStatusHttpTests : IClassFixture<KuraApiFactory>
     /// real, e <c>Marcar_falta_em_agendamento_AGENDADO_...</c> (que pede NAO_COMPARECEU) virava
     /// 422 em vez de 200 — mordida real da própria REC-11 contra um teste pré-existente.
     /// </summary>
-    private static DateTime AgoraSp()
-    {
-        var sp = TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo");
-        return TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, sp);
-    }
+    private DateTime AgoraSp() => _factory.AgoraSp();
 
     /// <summary>
     /// Semeia um agendamento na clínica do token. <c>Agendamento</c> NÃO tem

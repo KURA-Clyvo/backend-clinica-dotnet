@@ -40,11 +40,11 @@ using Microsoft.Extensions.DependencyInjection;
 /// </para>
 /// </summary>
 [Trait(ConvencaoDeTestes.Categoria, ConvencaoDeTestes.Integracao)]
-public class AgendamentoEventosRecepcaoHttpTests : IClassFixture<KuraApiFactory>
+public class AgendamentoEventosRecepcaoHttpTests : IClassFixture<KuraApiFactoryRelogioFixo>
 {
-    private readonly KuraApiFactory _factory;
+    private readonly KuraApiFactoryRelogioFixo _factory;
 
-    public AgendamentoEventosRecepcaoHttpTests(KuraApiFactory factory) => _factory = factory;
+    public AgendamentoEventosRecepcaoHttpTests(KuraApiFactoryRelogioFixo factory) => _factory = factory;
 
     private async Task<HttpClient> ClienteAutenticadoAsync()
     {
@@ -53,11 +53,7 @@ public class AgendamentoEventosRecepcaoHttpTests : IClassFixture<KuraApiFactory>
         return client;
     }
 
-    private static DateTime AgoraSp()
-    {
-        var sp = TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo");
-        return TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, sp);
-    }
+    private DateTime AgoraSp() => _factory.AgoraSp();
 
     private async Task SemearAgendamentoAsync(
         long id,
