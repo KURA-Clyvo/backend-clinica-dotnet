@@ -4,6 +4,7 @@ using Kura.Domain.Exceptions;
 using Kura.Domain.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Oracle.ManagedDataAccess.Client;
 
 public class UnitOfWork : IUnitOfWork
 {
@@ -25,6 +26,23 @@ public class UnitOfWork : IUnitOfWork
         {
             throw new ConflitoConcorrenciaException();
         }
+        catch (DbUpdateException ex) when (EhRotinaOracleIndisponivel(ex))
+        {
+            // S4-DB-06: o INSERT de COBRANCA dispara a trigger de auditoria (S4-DB-03); trigger ou
+            // package inválido falha aqui com ORA-04063/04098 e viraria 500. Só estes códigos
+            // mudam; qualquer outro DbUpdateException segue como estava.
+            throw new RotinaOracleIndisponivelException(ex);
+        }
+    }
+
+    private static bool EhRotinaOracleIndisponivel(DbUpdateException ex)
+    {
+        for (var inner = ex.InnerException; inner is not null; inner = inner.InnerException)
+        {
+            if (inner is OracleException oracle)
+                return RotinasOracle.ErrosRotinaOracle.IndisponivelNoInsert(oracle.Number);
+        }
+        return false;
     }
 
     public async Task BeginTransactionAsync()

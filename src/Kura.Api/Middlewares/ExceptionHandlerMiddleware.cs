@@ -120,6 +120,8 @@ public class ExceptionHandlerMiddleware
             // S4-NET-03: o $jsonSchema do Mongo recusou o laudo (dado invalido, erro permanente). E
             // DomainException mas NAO RegraDeNegocioException, entao precisa do case proprio.
             LaudoRecusadoPeloSchemaException => StatusCodes.Status422UnprocessableEntity,
+            // S4-DB-06: package/trigger Oracle ausente ou invalido e infraestrutura fora (503).
+            RotinaOracleIndisponivelException => StatusCodes.Status503ServiceUnavailable,
             UnauthorizedAccessException => StatusCodes.Status401Unauthorized,
             // FT-03 (backlog KURA_BACKLOG_FOTO_PET.md): o Kestrel lança esta exceção quando
             // o corpo da requisição excede o limite configurado por [RequestSizeLimit]
@@ -152,6 +154,10 @@ public class ExceptionHandlerMiddleware
         {
             ArmazenamentoDocumentosIndisponivelException =>
                 ("LAUDOS_INDISPONIVEL", "O armazenamento de laudos está indisponível no momento."),
+            // S4-DB-06: titulos FIXOS. A mensagem do Oracle (ORA-, KURA.PKG_COBRANCA) nunca vai ao cliente.
+            RotinaOracleIndisponivelException =>
+                ("ROTINA_ORACLE_INDISPONIVEL", RotinaOracleIndisponivelException.MensagemFixa),
+            RotinaOracleFalhouException => ((string?)null, RotinaOracleFalhouException.MensagemFixa),
             _ => ((string?)null, ex.Message),
         };
 
