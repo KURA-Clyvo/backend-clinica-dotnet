@@ -42,7 +42,8 @@ using Microsoft.AspNetCore.Mvc;
 /// <para>
 /// ⛔ <b>Escopo negativo (D-1/D-6):</b> sem imposto, repasse ou margem — o campo é
 /// <c>receitaBruta</c>, com essas palavras. Sem gateway, status de pagamento, projeção ou
-/// previsão. Sem mix por veterinário, sem estoque, sem exportação.
+/// previsão. Sem mix por veterinário, sem estoque, sem exportação própria do .NET (as duas
+/// rotas montadas pelo package Oracle, S4-DB-06, são a única exceção e só devolvem JSON pronto).
 /// </para>
 /// </summary>
 [Authorize(Policy = PoliticasAutorizacao.SomenteGestor)]
@@ -67,11 +68,12 @@ public class FinanceiroController : ControllerBase
     /// rotina Oracle está indisponível.
     /// </summary>
     [HttpGet("cobrancas/exportacao-json")]
-    [ProducesResponseType(typeof(string), 200, "application/json")]
+    [ProducesResponseType(typeof(System.Text.Json.JsonElement), 200, "application/json")]
     [ProducesResponseType(401)]
     [ProducesResponseType(403)]
     [ProducesResponseType(404)]
     [ProducesResponseType(503)]
+    [ProducesResponseType(500)]
     public async Task<IActionResult> ExportarCobrancasJson(CancellationToken ct) =>
         Content(await _oracle.ExportarJsonAsync(ct), "application/json");
 
@@ -83,11 +85,12 @@ public class FinanceiroController : ControllerBase
     /// Oracle está indisponível.
     /// </summary>
     [HttpGet("cobrancas/relatorio-oracle")]
-    [ProducesResponseType(typeof(string), 200, "application/json")]
+    [ProducesResponseType(typeof(System.Text.Json.JsonElement), 200, "application/json")]
     [ProducesResponseType(401)]
     [ProducesResponseType(403)]
     [ProducesResponseType(404)]
     [ProducesResponseType(503)]
+    [ProducesResponseType(500)]
     public async Task<IActionResult> RelatorioCobrancasOracle(CancellationToken ct) =>
         Content(await _oracle.RelatorioJsonAsync(ct), "application/json");
 

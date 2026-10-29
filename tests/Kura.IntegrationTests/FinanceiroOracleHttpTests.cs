@@ -223,4 +223,21 @@ public class FinanceiroOracleHttpTests : IClassFixture<FinanceiroOracleFixture>
         corpo.Should().Contain($"\"title\":\"{RotinaOracleFalhouException.MensagemFixa}\"");
         corpo.Should().NotContain("ORA-").And.NotContain("PKG_").And.NotContain("KURA.");
     }
+
+    [Theory]
+    [InlineData("/api/v1/financeiro/cobrancas/exportacao-json")]
+    [InlineData("/api/v1/financeiro/cobrancas/relatorio-oracle")]
+    public void Swagger_declara_200_como_application_json_sem_schema_de_string_e_declara_o_500(string rota)
+    {
+        // S4-DB-06 m-3: o corpo é array/objeto JSON pronto do package; não é uma "string".
+        var doc = _fx.Factory.Services.GetRequiredService<Swashbuckle.AspNetCore.Swagger.ISwaggerProvider>().GetSwagger("v1");
+        var op = doc.Paths![rota].Operations![System.Net.Http.HttpMethod.Get];
+
+        op.Responses!.Should().ContainKey("500");
+        var ok = op.Responses["200"];
+        ok.Content.Should().NotBeNull();
+        ok.Content.Should().ContainKey("application/json");
+        var tipo = ok.Content["application/json"].Schema?.Type;
+        (tipo is null || !tipo.Value.HasFlag(Microsoft.OpenApi.JsonSchemaType.String)).Should().BeTrue("o 200 não é uma string JSON");
+    }
 }

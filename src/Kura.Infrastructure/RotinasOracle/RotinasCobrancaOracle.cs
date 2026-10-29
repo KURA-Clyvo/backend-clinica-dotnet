@@ -20,8 +20,10 @@ using Oracle.ManagedDataAccess.Types;
 /// transação corrente do EF, o comando participa dela. As rotinas não fazem COMMIT/ROLLBACK.</description></item>
 /// <item><description>O CLOB de saída é temporário (<c>DBMS_LOB.SESSION</c>): é lido com a
 /// conexão aberta e recebe <c>Dispose</c>.</description></item>
-/// <item><description>Qualquer falha vira exceção de domínio de mensagem fixa (ver
-/// <see cref="ErrosRotinaOracle"/>); nada do texto do Oracle sai daqui.</description></item>
+/// <item><description>Qualquer falha vira exceção de mensagem fixa — <c>EntidadeNaoEncontradaException</c>,
+/// <c>RotinaOracleIndisponivelException</c> ou <c>RotinaOracleFalhouException</c> (ver
+/// <see cref="ErrosRotinaOracle"/>); nada do texto do Oracle sai daqui. Só o cancelamento
+/// (<c>OperationCanceledException</c>) propaga como está.</description></item>
 /// </list>
 ///
 /// <para>🔴 A rotina que devolve todas as clínicas não é chamada em lugar nenhum desta classe

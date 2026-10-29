@@ -4,8 +4,10 @@ using Kura.Domain.Exceptions;
 
 /// <summary>
 /// S4-DB-06 — tradução <b>pura</b> de <c>OracleException.Number</c> em exceção de domínio.
-/// É função de <c>int</c> (e não de <c>OracleException</c>) porque o driver não deixa construir
-/// <c>OracleException</c> em teste. Contrato do banco: <c>s4-db-03-revisao.md</c>, "Contrato para
+/// É função de <c>int</c> (e não de <c>OracleException</c>) porque o construtor do driver não é
+/// público: o teste desta função é direto, sem montar a exceção. (Os testes do <c>UnitOfWork</c>
+/// a constroem por reflexão, de propósito, para exercitar o <c>catch</c> real.) Contrato do banco:
+/// <c>s4-db-03-revisao.md</c>, "Contrato para
 /// a S4-DB-06".
 ///
 /// <para>🔴 Mapeia por <b>Number</b>, nunca por <c>Message</c>: a mensagem do Oracle traz
